@@ -217,6 +217,41 @@ export const dbOperations = {
     });
   },
 
+  // Startup chat
+  async getStartupChat(startupId, userId) {
+    return request(`/startups/${startupId}/chat?userId=${encodeURIComponent(userId)}`);
+  },
+
+  async sendStartupChat(startupId, payload) {
+    return request(`/startups/${startupId}/chat`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  // Startup recommendations and invitations
+  async getStartupRecommendations(startupId, userId) {
+    return request(`/startups/${startupId}/recommendations?userId=${encodeURIComponent(userId)}`);
+  },
+
+  async sendStartupInvitation(startupId, payload) {
+    return request(`/startups/${startupId}/invitations`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async getInvitations(userId) {
+    return request(`/invitations?userId=${encodeURIComponent(userId)}`);
+  },
+
+  async respondInvitation(invitationId, payload) {
+    return request(`/invitations/${invitationId}/respond`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
   // Reputation graph
   async getStartupReputation(startupId) {
     return request(`/startups/${startupId}/reputation`);

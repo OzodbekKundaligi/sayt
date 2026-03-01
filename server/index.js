@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 5174;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 const parseJson = (value, fallback = []) => {
   if (!value) return fallback;
@@ -111,6 +111,7 @@ const mapNotification = (row) => {
     text: row.text,
     type: row.type,
     is_read: row.is_read === 1,
+    meta: parseJson(row.meta, null),
     created_at: row.created_at
   };
 };
@@ -147,6 +148,39 @@ const mapProPaymentRequest = (row) => {
   };
 };
 
+const mapStartupChatMessage = (row) => {
+  if (!row) return null;
+  return {
+    id: row.id,
+    startup_id: row.startup_id,
+    sender_id: row.sender_id,
+    sender_name: row.sender_name,
+    message_type: row.message_type || 'text',
+    content: row.content || '',
+    file_name: row.file_name || '',
+    file_url: row.file_url || '',
+    created_at: row.created_at
+  };
+};
+
+const mapStartupInvitation = (row) => {
+  if (!row) return null;
+  return {
+    id: row.id,
+    startup_id: row.startup_id,
+    startup_name: row.startup_name,
+    inviter_id: row.inviter_id,
+    inviter_name: row.inviter_name,
+    invitee_id: row.invitee_id,
+    invitee_name: row.invitee_name,
+    role_hint: row.role_hint || '',
+    status: row.status || 'pending',
+    notification_id: row.notification_id || null,
+    created_at: row.created_at,
+    responded_at: row.responded_at || null
+  };
+};
+
 const buildUpdate = (body, jsonFields = []) => {
   const fields = [];
   const values = [];
@@ -165,6 +199,12 @@ const buildUpdate = (body, jsonFields = []) => {
 const nowIso = () => new Date().toISOString();
 const makeId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const toBoolInt = (value) => (value ? 1 : 0);
+
+const isStartupMember = (startup, userId) => {
+  if (!startup || !userId) return false;
+  if (startup.egasi_id === userId) return true;
+  return (startup.a_zolar || []).some((m) => m.user_id === userId);
+};
 
 const getPlatformConfig = async () => {
   const platform = await get('SELECT * FROM platform_settings WHERE id = 1');
@@ -829,6 +869,8 @@ app.delete('/api/users/:id', async (req, res) => {
   await run('DELETE FROM join_requests WHERE user_id = ?', [userId]);
   await run('DELETE FROM notifications WHERE user_id = ?', [userId]);
   await run('DELETE FROM pro_payment_requests WHERE user_id = ?', [userId]);
+  await run('DELETE FROM startup_chat_messages WHERE sender_id = ?', [userId]);
+  await run('DELETE FROM startup_invitations WHERE invitee_id = ? OR inviter_id = ?', [userId, userId]);
   const startups = await all('SELECT * FROM startups');
   for (const s of startups) {
     const members = parseJson(s.a_zolar);
@@ -953,6 +995,8 @@ app.delete('/api/startups/:id', async (req, res) => {
   await run('DELETE FROM equity_allocations WHERE startup_id = ?', [id]);
   await run('DELETE FROM safekeeping_agreements WHERE startup_id = ?', [id]);
   await run('DELETE FROM investor_intros WHERE startup_id = ?', [id]);
+  await run('DELETE FROM startup_chat_messages WHERE startup_id = ?', [id]);
+  await run('DELETE FROM startup_invitations WHERE startup_id = ?', [id]);
   await logAction(req.query?.actor_id, 'delete_startup', 'startup', id);
   res.status(204).end();
 });
@@ -1006,7 +1050,7 @@ app.get('/api/notifications', async (req, res) => {
   const userId = req.query.userId;
   let rows = [];
   if (userId && userId !== 'all') {
-    rows = await all('SELECT * FROM notifications WHERE user_id = ? OR user_id = "admin" ORDER BY created_at DESC', [userId]);
+    rows = await all('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC', [userId]);
   } else {
     rows = await all('SELECT * FROM notifications ORDER BY created_at DESC');
   }
@@ -1016,8 +1060,8 @@ app.get('/api/notifications', async (req, res) => {
 app.post('/api/notifications', async (req, res) => {
   const n = req.body;
   await run(
-    `INSERT INTO notifications (id, user_id, title, text, type, is_read, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO notifications (id, user_id, title, text, type, is_read, meta, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       n.id,
       n.user_id,
@@ -1025,6 +1069,7 @@ app.post('/api/notifications', async (req, res) => {
       n.text,
       n.type || 'info',
       n.is_read ? 1 : 0,
+      n.meta ? JSON.stringify(n.meta) : null,
       n.created_at || new Date().toISOString()
     ]
   );
@@ -1043,6 +1088,324 @@ app.put('/api/notifications/mark-all-read', async (req, res) => {
   if (!userId) return res.status(400).send('userId required');
   await run('UPDATE notifications SET is_read = 1 WHERE user_id = ?', [userId]);
   res.status(204).end();
+});
+
+// Startup chat (members only)
+app.get('/api/startups/:id/chat', async (req, res) => {
+  const startupId = req.params.id;
+  const userId = req.query.userId;
+  if (!userId) return res.status(400).send('userId required');
+
+  const startupRow = await get('SELECT * FROM startups WHERE id = ?', [startupId]);
+  if (!startupRow) return res.status(404).send('Startup not found');
+  const startup = mapStartup(startupRow);
+  if (!isStartupMember(startup, userId)) return res.status(403).send('Only startup members can access chat');
+
+  const rows = await all(
+    `SELECT * FROM startup_chat_messages WHERE startup_id = ? ORDER BY created_at ASC`,
+    [startupId]
+  );
+  res.json(rows.map(mapStartupChatMessage));
+});
+
+app.post('/api/startups/:id/chat', async (req, res) => {
+  const startupId = req.params.id;
+  const userId = req.body?.user_id;
+  const content = (req.body?.content || '').trim();
+  const messageType = (req.body?.message_type || 'text').trim().toLowerCase();
+  const fileName = (req.body?.file_name || '').trim();
+  const fileUrl = req.body?.file_url || '';
+  if (!userId) return res.status(400).send('user_id required');
+  if (!content && !fileUrl) return res.status(400).send('content or file_url required');
+  if (!['text', 'image', 'file'].includes(messageType)) return res.status(400).send('Invalid message_type');
+
+  const startupRow = await get('SELECT * FROM startups WHERE id = ?', [startupId]);
+  if (!startupRow) return res.status(404).send('Startup not found');
+  const startup = mapStartup(startupRow);
+  if (!isStartupMember(startup, userId)) return res.status(403).send('Only startup members can send chat');
+
+  let senderName = 'Noma\'lum';
+  if (userId === 'admin') {
+    senderName = 'Admin';
+  } else {
+    const sender = await get('SELECT * FROM users WHERE id = ?', [userId]);
+    if (!sender) return res.status(404).send('Sender not found');
+    senderName = sender.name || sender.id;
+  }
+
+  const id = makeId('sch');
+  const createdAt = nowIso();
+  await run(
+    `INSERT INTO startup_chat_messages (
+      id, startup_id, sender_id, sender_name, message_type, content, file_name, file_url, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, startupId, userId, senderName, messageType, content, fileName, fileUrl, createdAt]
+  );
+
+  await run(
+    `INSERT INTO workspace_activity (id, startup_id, user_id, activity_type, payload, hours_spent, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      makeId('act'),
+      startupId,
+      userId,
+      'chat_message_sent',
+      JSON.stringify({ message_type: messageType, has_file: !!fileUrl }),
+      0,
+      createdAt
+    ]
+  );
+
+  const created = await get('SELECT * FROM startup_chat_messages WHERE id = ?', [id]);
+  res.status(201).json(mapStartupChatMessage(created));
+});
+
+// Candidate recommendations for startup members
+app.get('/api/startups/:id/recommendations', async (req, res) => {
+  const startupId = req.params.id;
+  const userId = req.query.userId;
+  if (!userId) return res.status(400).send('userId required');
+
+  const startupRow = await get('SELECT * FROM startups WHERE id = ?', [startupId]);
+  if (!startupRow) return res.status(404).send('Startup not found');
+  const startup = mapStartup(startupRow);
+  if (!isStartupMember(startup, userId)) return res.status(403).send('Only startup members can view recommendations');
+
+  const needed = (startup.kerakli_mutaxassislar || [])
+    .map((item) => String(item || '').toLowerCase().trim())
+    .filter(Boolean);
+  if (needed.length === 0) return res.json([]);
+
+  const memberIds = new Set((startup.a_zolar || []).map((m) => m.user_id));
+  memberIds.add(startup.egasi_id);
+
+  const users = await all('SELECT * FROM users WHERE banned = 0');
+  const pendingInvites = await all(
+    `SELECT invitee_id FROM startup_invitations WHERE startup_id = ? AND status = 'pending'`,
+    [startupId]
+  );
+  const pendingInviteIds = new Set(pendingInvites.map((p) => p.invitee_id));
+
+  const normalizeText = (value) =>
+    String(value || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const candidates = users
+    .map((row) => mapUser(row))
+    .filter((u) => u && !memberIds.has(u.id) && !pendingInviteIds.has(u.id))
+    .map((u) => {
+      const haystack = normalizeText(
+        `${u.name || ''} ${(u.skills || []).join(' ')} ${u.bio || ''} ${u.portfolio_url || ''}`
+      );
+      const matched = needed.filter((spec) => {
+        const token = normalizeText(spec);
+        if (!token) return false;
+        const parts = token.split(/[\s/,+-]+/).filter((p) => p.length >= 2);
+        if (parts.length === 0) return false;
+        return parts.some((p) => haystack.includes(p));
+      });
+      return {
+        id: u.id,
+        name: u.name,
+        avatar: u.avatar || '',
+        bio: u.bio || '',
+        skills: u.skills || [],
+        is_pro: !!u.is_pro,
+        matched_specialties: matched,
+        match_score: matched.length
+      };
+    })
+    .filter((u) => u.match_score > 0)
+    .sort((a, b) => {
+      if (b.match_score !== a.match_score) return b.match_score - a.match_score;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 20);
+
+  res.json(candidates);
+});
+
+// Startup invitation flow
+app.post('/api/startups/:id/invitations', async (req, res) => {
+  const startupId = req.params.id;
+  const inviterId = req.body?.inviter_id;
+  const inviteeId = req.body?.invitee_id;
+  const roleHint = (req.body?.role_hint || '').trim();
+  if (!inviterId || !inviteeId) return res.status(400).send('inviter_id and invitee_id required');
+  if (inviterId === inviteeId) return res.status(400).send('Cannot invite yourself');
+
+  const startupRow = await get('SELECT * FROM startups WHERE id = ?', [startupId]);
+  if (!startupRow) return res.status(404).send('Startup not found');
+  const startup = mapStartup(startupRow);
+  if (!isStartupMember(startup, inviterId)) return res.status(403).send('Only members can invite');
+
+  const inviteeRow = await get('SELECT * FROM users WHERE id = ?', [inviteeId]);
+  if (!inviteeRow) return res.status(404).send('Invitee not found');
+  if (inviteeRow.banned === 1) return res.status(400).send('Invitee is banned');
+  if (isStartupMember(startup, inviteeId)) return res.status(409).send('User is already a member');
+
+  const existingPending = await get(
+    `SELECT * FROM startup_invitations WHERE startup_id = ? AND invitee_id = ? AND status = 'pending'`,
+    [startupId, inviteeId]
+  );
+  if (existingPending) return res.status(409).send('Pending invitation already exists');
+
+  let inviterName = 'Noma\'lum';
+  if (inviterId === 'admin') {
+    inviterName = 'Admin';
+  } else {
+    const inviter = await get('SELECT * FROM users WHERE id = ?', [inviterId]);
+    if (!inviter) return res.status(404).send('Inviter not found');
+    inviterName = inviter.name || inviter.id;
+  }
+
+  const createdAt = nowIso();
+  const invitationId = makeId('sinv');
+  const notificationId = makeId('n');
+  await run(
+    `INSERT INTO startup_invitations (
+      id, startup_id, startup_name, inviter_id, inviter_name, invitee_id, invitee_name, role_hint, status, notification_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      invitationId,
+      startupId,
+      startup.nomi,
+      inviterId,
+      inviterName,
+      inviteeId,
+      inviteeRow.name || inviteeId,
+      roleHint,
+      'pending',
+      notificationId,
+      createdAt
+    ]
+  );
+
+  await run(
+    `INSERT INTO notifications (id, user_id, title, text, type, is_read, meta, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      notificationId,
+      inviteeId,
+      'Startup taklifi',
+      `${inviterName} sizni "${startup.nomi}" startupiga taklif qildi.`,
+      'info',
+      0,
+      JSON.stringify({
+        kind: 'startup_invitation',
+        invitation_id: invitationId,
+        startup_id: startupId,
+        startup_name: startup.nomi,
+        inviter_id: inviterId,
+        inviter_name: inviterName
+      }),
+      createdAt
+    ]
+  );
+
+  const created = await get('SELECT * FROM startup_invitations WHERE id = ?', [invitationId]);
+  res.status(201).json(mapStartupInvitation(created));
+});
+
+app.get('/api/invitations', async (req, res) => {
+  const userId = req.query.userId;
+  if (!userId) return res.status(400).send('userId required');
+  const rows = await all(
+    `SELECT * FROM startup_invitations WHERE invitee_id = ? ORDER BY created_at DESC`,
+    [userId]
+  );
+  res.json(rows.map(mapStartupInvitation));
+});
+
+app.post('/api/invitations/:id/respond', async (req, res) => {
+  const invitationId = req.params.id;
+  const userId = req.body?.user_id;
+  const action = req.body?.action;
+  if (!userId || !['accept', 'reject'].includes(action)) {
+    return res.status(400).send('user_id and action(accept|reject) required');
+  }
+
+  const invitation = await get('SELECT * FROM startup_invitations WHERE id = ?', [invitationId]);
+  if (!invitation) return res.status(404).send('Invitation not found');
+  if (invitation.invitee_id !== userId) return res.status(403).send('Only invited user can respond');
+  if (invitation.status !== 'pending') return res.status(400).send('Invitation already handled');
+
+  const startupRow = await get('SELECT * FROM startups WHERE id = ?', [invitation.startup_id]);
+  if (!startupRow) return res.status(404).send('Startup not found');
+  const startup = mapStartup(startupRow);
+
+  const now = nowIso();
+  let nextStatus = 'rejected';
+  if (action === 'accept') {
+    const members = Array.isArray(startup.a_zolar) ? startup.a_zolar : [];
+    const alreadyMember = members.some((m) => m.user_id === userId);
+    if (!alreadyMember) {
+      const nextMembers = [
+        ...members,
+        {
+          user_id: invitation.invitee_id,
+          name: invitation.invitee_name,
+          role: invitation.role_hint || "A'zo",
+          joined_at: now
+        }
+      ];
+      await run('UPDATE startups SET a_zolar = ? WHERE id = ?', [JSON.stringify(nextMembers), startup.id]);
+    }
+    nextStatus = 'accepted';
+    await run(
+      `INSERT INTO workspace_activity (id, startup_id, user_id, activity_type, payload, hours_spent, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        makeId('act'),
+        startup.id,
+        userId,
+        'invitation_accepted',
+        JSON.stringify({ invitation_id: invitationId }),
+        0,
+        now
+      ]
+    );
+  }
+
+  await run(
+    'UPDATE startup_invitations SET status = ?, responded_at = ? WHERE id = ?',
+    [nextStatus, now, invitationId]
+  );
+  if (invitation.notification_id) {
+    await run('UPDATE notifications SET is_read = 1 WHERE id = ?', [invitation.notification_id]);
+  }
+
+  const inviterTargets = new Set([invitation.inviter_id, startup.egasi_id].filter(Boolean));
+  for (const targetId of inviterTargets) {
+    await run(
+      `INSERT INTO notifications (id, user_id, title, text, type, is_read, meta, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        makeId('n'),
+        targetId,
+        action === 'accept' ? 'Taklif qabul qilindi' : 'Taklif rad etildi',
+        action === 'accept'
+          ? `${invitation.invitee_name} "${startup.nomi}" startupiga qo'shildi.`
+          : `${invitation.invitee_name} taklifingizni rad etdi.`,
+        action === 'accept' ? 'success' : 'danger',
+        0,
+        JSON.stringify({
+          kind: 'startup_invitation_result',
+          invitation_id: invitationId,
+          startup_id: startup.id,
+          startup_name: startup.nomi,
+          invitee_id: invitation.invitee_id,
+          action
+        }),
+        now
+      ]
+    );
+  }
+
+  const updated = await get('SELECT * FROM startup_invitations WHERE id = ?', [invitationId]);
+  res.json(mapStartupInvitation(updated));
 });
 
 // Tasks

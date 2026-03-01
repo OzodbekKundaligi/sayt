@@ -7,6 +7,7 @@ import Logo from './r.png';
 const ADMIN_EMAIL = 'mamatovo354@gmail.com';
 const ADMIN_PASS = '123@Ozod';
 const DEFAULT_CATEGORIES = ["Fintech", "Edtech", "AI/ML", "E-commerce", "SaaS", "Blockchain", "Healthcare", "Cybersecurity", "GameDev", "Networking", "Productivity", "Other"];
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 // --- REUSABLE UI COMPONENTS ---
 const Badge = ({ children, variant = 'default', size = 'sm', className = "" }) => {
@@ -147,6 +148,12 @@ const App = () => {
   const [workspaceContext, setWorkspaceContext] = useState(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [profileReputation, setProfileReputation] = useState(null);
+  const [startupChatMessages, setStartupChatMessages] = useState([]);
+  const [startupChatText, setStartupChatText] = useState('');
+  const [startupChatAttachment, setStartupChatAttachment] = useState(null);
+  const [startupChatSending, setStartupChatSending] = useState(false);
+  const [memberRecommendations, setMemberRecommendations] = useState([]);
+  const [pendingInvitations, setPendingInvitations] = useState([]);
 
   // --- UI STATE ---
   const [activeTab, setActiveTab] = useState('explore');
@@ -233,6 +240,8 @@ const App = () => {
   const [viewedUserReputation, setViewedUserReputation] = useState(null);
 
   const chatEndRef = useRef(null);
+  const startupChatEndRef = useRef(null);
+  const startupChatFileRef = useRef(null);
 
   // --- INITIAL DATA LOAD ---
   useEffect(() => {
@@ -346,7 +355,17 @@ const App = () => {
     if (!startupId) return;
     try {
       setWorkspaceLoading(true);
-      const workspace = await dbOperations.getStartupWorkspace(startupId);
+      const startupSnapshot = startups.find((s) => s.id === startupId);
+      const canLoadMemberData = !!currentUser && (
+        !startupSnapshot ||
+        startupSnapshot.egasi_id === currentUser.id ||
+        startupSnapshot.a_zolar.some((m) => m.user_id === currentUser.id)
+      );
+      const [workspace, chatRows, recRows] = await Promise.all([
+        dbOperations.getStartupWorkspace(startupId),
+        canLoadMemberData ? dbOperations.getStartupChat(startupId, currentUser.id).catch(() => []) : Promise.resolve([]),
+        canLoadMemberData ? dbOperations.getStartupRecommendations(startupId, currentUser.id).catch(() => []) : Promise.resolve([])
+      ]);
       setWorkspaceContext(workspace);
       setRegistryDraft({
         lifecycle_status: workspace?.startup?.lifecycle_status || 'live',
@@ -354,9 +373,17 @@ const App = () => {
         registry_notes: workspace?.startup?.registry_notes || ''
       });
       setReviewDraft((prev) => ({ ...prev, to_user_id: '' }));
+      setStartupChatMessages(Array.isArray(chatRows) ? chatRows : []);
+      setMemberRecommendations(Array.isArray(recRows) ? recRows : []);
+      if (currentUser && currentUser.role !== 'admin') {
+        const invites = await dbOperations.getInvitations(currentUser.id).catch(() => []);
+        setPendingInvitations(Array.isArray(invites) ? invites.filter((i) => i.status === 'pending') : []);
+      }
     } catch (error) {
       console.error('Workspace yuklashda xatolik:', error);
       setWorkspaceContext(null);
+      setStartupChatMessages([]);
+      setMemberRecommendations([]);
     } finally {
       setWorkspaceLoading(false);
     }
@@ -365,6 +392,11 @@ const App = () => {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [aiChat]);
+
+  useEffect(() => {
+    if (activeDetailTab !== 'chat') return;
+    startupChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [startupChatMessages, activeDetailTab]);
 
   useEffect(() => {
     if (activeTab === 'admin' && currentUser?.role === 'admin') {
@@ -376,7 +408,7 @@ const App = () => {
     if (activeTab === 'details' && selectedStartupId) {
       loadWorkspaceContext(selectedStartupId);
     }
-  }, [activeTab, selectedStartupId]);
+  }, [activeTab, selectedStartupId, currentUser?.id]);
 
   useEffect(() => {
     const loadProfileReputation = async () => {
@@ -428,7 +460,10 @@ const App = () => {
   }, [notifications.length]);
 
   useEffect(() => {
-    if (!currentUser) return undefined;
+    if (!currentUser) {
+      setPendingInvitations([]);
+      return undefined;
+    }
     const refreshLoop = async () => {
       const userNotifs = await dbOperations.getNotifications(currentUser.id).catch(() => []);
       if (Array.isArray(userNotifs)) setNotifications(userNotifs);
@@ -439,19 +474,28 @@ const App = () => {
           setCurrentUser(freshUser);
           setAllUsers((prev) => prev.map((u) => (u.id === freshUser.id ? freshUser : u)));
         }
+        const invites = await dbOperations.getInvitations(currentUser.id).catch(() => []);
+        if (Array.isArray(invites)) {
+          setPendingInvitations(invites.filter((i) => i.status === 'pending'));
+        }
       } else {
         const pending = await dbOperations.getProRequests({ role: 'admin', status: 'pending' }).catch(() => []);
         if (Array.isArray(pending)) setProRequests(pending);
+      }
+
+      if (activeTab === 'details' && selectedStartupId) {
+        const chatRows = await dbOperations.getStartupChat(selectedStartupId, currentUser.id).catch(() => []);
+        if (Array.isArray(chatRows)) setStartupChatMessages(chatRows);
       }
     };
     refreshLoop();
     const interval = setInterval(refreshLoop, 20000);
     return () => clearInterval(interval);
-  }, [currentUser?.id, currentUser?.role]);
+  }, [currentUser?.id, currentUser?.role, activeTab, selectedStartupId]);
 
   // --- HANDLERS ---
 
-  const addNotification = async (userId, title, text, type = 'info') => {
+  const addNotification = async (userId, title, text, type = 'info', meta = null) => {
     const n = { 
       id: `n_${Date.now()}`, 
       user_id: userId, 
@@ -459,6 +503,7 @@ const App = () => {
       text, 
       type, 
       is_read: false, 
+      meta,
       created_at: new Date().toISOString() 
     };
     
@@ -1093,6 +1138,115 @@ const App = () => {
     setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, is_read: true } : n));
   };
 
+  const handleStartupChatFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      alert("Fayl hajmi 8MB dan oshmasligi kerak.");
+      e.target.value = '';
+      return;
+    }
+    try {
+      const base64 = await convertToBase64(file);
+      setStartupChatAttachment({
+        name: file.name,
+        type: file.type || 'application/octet-stream',
+        url: base64
+      });
+    } catch {
+      alert("Faylni o'qishda xatolik.");
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleSendStartupMessage = async () => {
+    if (!selectedStartup || !currentUser || startupChatSending) return;
+    const text = startupChatText.trim();
+    if (!text && !startupChatAttachment) return;
+
+    const messageType = startupChatAttachment
+      ? (startupChatAttachment.type.startsWith('image/') ? 'image' : 'file')
+      : 'text';
+
+    setStartupChatSending(true);
+    try {
+      const created = await dbOperations.sendStartupChat(selectedStartup.id, {
+        user_id: currentUser.id,
+        message_type: messageType,
+        content: text,
+        file_name: startupChatAttachment?.name || '',
+        file_url: startupChatAttachment?.url || ''
+      });
+      setStartupChatMessages((prev) => [...prev, created]);
+      setStartupChatText('');
+      setStartupChatAttachment(null);
+    } catch (e) {
+      alert(e?.message || "Xabar yuborishda xatolik.");
+    } finally {
+      setStartupChatSending(false);
+    }
+  };
+
+  const handleSendStartupInvite = async (candidate) => {
+    if (!selectedStartup || !currentUser) return;
+    try {
+      await dbOperations.sendStartupInvitation(selectedStartup.id, {
+        inviter_id: currentUser.id,
+        invitee_id: candidate.id,
+        role_hint: (candidate?.matched_specialties || [])[0] || "Mutaxassis"
+      });
+      alert('Taklif yuborildi.');
+      const recRows = await dbOperations.getStartupRecommendations(selectedStartup.id, currentUser.id).catch(() => []);
+      if (Array.isArray(recRows)) setMemberRecommendations(recRows);
+    } catch (e) {
+      alert(e?.message || "Taklif yuborishda xatolik.");
+    }
+  };
+
+  const handleRespondInvitation = async (invitationId, action, notificationId = null) => {
+    if (!currentUser) return;
+    try {
+      await dbOperations.respondInvitation(invitationId, {
+        user_id: currentUser.id,
+        action
+      });
+      if (notificationId) {
+        await dbOperations.markNotificationAsRead(notificationId).catch(() => null);
+      }
+      const [nextNotifs, nextInvites] = await Promise.all([
+        dbOperations.getNotifications(currentUser.id).catch(() => []),
+        dbOperations.getInvitations(currentUser.id).catch(() => [])
+      ]);
+      if (Array.isArray(nextNotifs)) setNotifications(nextNotifs);
+      if (Array.isArray(nextInvites)) setPendingInvitations(nextInvites.filter((i) => i.status === 'pending'));
+      await reloadStartups();
+      if (selectedStartupId) await loadWorkspaceContext(selectedStartupId);
+    } catch (e) {
+      alert(e?.message || 'Taklifga javob berishda xatolik.');
+    }
+  };
+
+  const renderLinkifiedText = (text) => {
+    const value = String(text || '');
+    const parts = value.split(URL_REGEX);
+    return parts.map((part, index) => {
+      const isLink = /^https?:\/\//i.test(part);
+      if (!isLink) return <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>;
+      return (
+        <a
+          key={`${part}-${index}`}
+          href={part}
+          target="_blank"
+          rel="noreferrer"
+          className="underline break-all font-semibold"
+        >
+          {part}
+        </a>
+      );
+    });
+  };
+
   const refreshWorkspaceAndStartup = async (startupId = selectedStartupId) => {
     if (!startupId) return;
     await Promise.all([loadWorkspaceContext(startupId), reloadStartups()]);
@@ -1313,6 +1467,10 @@ const App = () => {
   );
   
   const unreadNotifCount = userNotifications.filter(n => !n.is_read).length;
+  const invitationByNotification = useMemo(
+    () => Object.fromEntries((pendingInvitations || []).map((inv) => [inv.notification_id, inv])),
+    [pendingInvitations]
+  );
 
   const selectedStartup = startups.find(s => s.id === selectedStartupId);
   const workspaceData = workspaceContext || {};
@@ -1652,6 +1810,7 @@ const App = () => {
         <nav className="flex items-center border-b border-gray-100 gap-6 md:gap-8 h-10 overflow-x-auto no-scrollbar scroll-smooth">
           {[
             { key: 'vazifalar', label: 'Vazifalar' },
+            { key: 'chat', label: 'Chat' },
             { key: 'reputatsiya', label: 'Reputatsiya' },
             { key: 'governance', label: 'Boshqaruv' },
             { key: 'kapital', label: 'Ulush' },
@@ -1728,6 +1887,105 @@ const App = () => {
                 </div>
               ))}
             </div>
+          )}
+
+          {activeDetailTab === 'chat' && (
+            (isOwner || isMember) ? (
+              <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
+                <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+                  <div className="h-[430px] md:h-[520px] p-4 md:p-5 space-y-3 overflow-y-auto custom-scrollbar bg-slate-50/60">
+                    {startupChatMessages.map((msg) => {
+                      const mine = msg.sender_id === currentUser?.id;
+                      return (
+                        <div key={msg.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[88%] rounded-2xl border p-3 space-y-2 ${mine ? 'bg-blue-600 text-white border-blue-500' : 'bg-white text-gray-900 border-gray-200'}`}>
+                            <div className={`text-[10px] font-bold uppercase tracking-widest ${mine ? 'text-blue-100' : 'text-gray-400'}`}>
+                              {msg.sender_name}
+                            </div>
+                            {msg.content && (
+                              <p className={`text-[13px] whitespace-pre-wrap break-words ${mine ? 'text-white' : 'text-gray-800'}`}>
+                                {renderLinkifiedText(msg.content)}
+                              </p>
+                            )}
+                            {msg.message_type === 'image' && msg.file_url && (
+                              <a href={msg.file_url} target="_blank" rel="noreferrer" className="block">
+                                <img src={msg.file_url} alt={msg.file_name || 'Yuklangan rasm'} className="max-h-[230px] rounded-xl border border-white/30 object-contain bg-black/5" />
+                              </a>
+                            )}
+                            {msg.message_type === 'file' && msg.file_url && (
+                              <a href={msg.file_url} target="_blank" rel="noreferrer" download={msg.file_name || 'fayl'} className={`inline-flex items-center gap-2 text-[12px] font-semibold underline ${mine ? 'text-white' : 'text-blue-600'}`}>
+                                <i className="fa-solid fa-file-arrow-down"></i>
+                                <span className="break-all">{msg.file_name || 'Faylni ochish'}</span>
+                              </a>
+                            )}
+                            <p className={`text-[10px] ${mine ? 'text-blue-100' : 'text-gray-400'}`}>
+                              {new Date(msg.created_at).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {startupChatMessages.length === 0 && (
+                      <EmptyState icon="fa-comments" title="Chat bo'sh" subtitle="Birinchi xabarni yuboring." />
+                    )}
+                    <div ref={startupChatEndRef} />
+                  </div>
+                  <div className="border-t border-gray-200 p-3 md:p-4 space-y-3 bg-white">
+                    {startupChatAttachment && (
+                      <div className="flex items-center justify-between bg-slate-100 border border-slate-200 rounded-xl px-3 py-2">
+                        <p className="text-[12px] font-medium text-slate-700 truncate pr-3">
+                          <i className={`fa-solid ${startupChatAttachment.type.startsWith('image/') ? 'fa-image' : 'fa-file'} mr-2`}></i>
+                          {startupChatAttachment.name}
+                        </p>
+                        <button onClick={() => setStartupChatAttachment(null)} className="text-slate-400 hover:text-rose-600">
+                          <i className="fa-solid fa-xmark"></i>
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex items-end gap-2">
+                      <textarea
+                        value={startupChatText}
+                        onChange={(e) => setStartupChatText(e.target.value)}
+                        placeholder="Xabar yozing, link yuboring yoki fayl biriktiring..."
+                        className="flex-grow min-h-[42px] max-h-[130px] border border-gray-200 rounded-xl px-3 py-2 text-[13px] outline-none focus:border-blue-500 resize-y"
+                      />
+                      <input
+                        ref={startupChatFileRef}
+                        type="file"
+                        onChange={handleStartupChatFileChange}
+                        className="hidden"
+                      />
+                      <Button
+                        variant="secondary"
+                        className="h-11 px-4"
+                        onClick={() => startupChatFileRef.current?.click()}
+                        icon="fa-paperclip"
+                      >
+                        Fayl
+                      </Button>
+                      <Button
+                        className="h-11 px-5"
+                        onClick={handleSendStartupMessage}
+                        icon="fa-paper-plane"
+                        loading={startupChatSending}
+                      >
+                        Yuborish
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-4">
+                  <h3 className="text-[12px] font-black uppercase tracking-widest text-gray-600">Chat qoidalari</h3>
+                  <div className="space-y-3 text-[12px] text-gray-600">
+                    <p>Faqat shu startup a'zolari chatni ko'ra oladi.</p>
+                    <p>Link yuborsangiz avtomatik bosiladigan ko'rinishda chiqadi.</p>
+                    <p>Rasm va hujjatlarni biriktirib yuborishingiz mumkin.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <EmptyState icon="fa-lock" title="Chat yopiq" subtitle="Chat faqat startup a'zolariga ochiq." />
+            )
           )}
 
           {activeDetailTab === 'reputatsiya' && (
@@ -2149,23 +2407,69 @@ const App = () => {
           )}
 
           {activeDetailTab === 'jamoa' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-              {selectedStartup.a_zolar.map((m, i) => (
-                <div
-                  key={i}
-                  onClick={() => handleOpenUserProfile(m.user_id)}
-                  className="bg-white border border-gray-100 rounded-xl p-5 md:p-6 flex items-center gap-4 md:gap-5 hover:border-black transition-all relative group min-w-0 cursor-pointer"
-                >
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-gray-50 border border-gray-100 rounded-full flex items-center justify-center text-[14px] md:text-[16px] font-black uppercase italic shadow-inner shrink-0">
-                    {m.name[0]}
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                {selectedStartup.a_zolar.map((m, i) => (
+                  <div
+                    key={i}
+                    onClick={() => handleOpenUserProfile(m.user_id)}
+                    className="bg-white border border-gray-100 rounded-xl p-5 md:p-6 flex items-center gap-4 md:gap-5 hover:border-black transition-all relative group min-w-0 cursor-pointer"
+                  >
+                    <div className="w-10 h-10 md:w-12 md:h-12 bg-gray-50 border border-gray-100 rounded-full flex items-center justify-center text-[14px] md:text-[16px] font-black uppercase italic shadow-inner shrink-0">
+                      {m.name[0]}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-[14px] md:text-[15px] font-bold tracking-tight truncate">{m.name}</h4>
+                      <Badge variant="active" size="sm" className="mt-1 truncate max-w-full">{m.role}</Badge>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-2">{new Date(m.joined_at).toLocaleDateString()}</p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <h4 className="text-[14px] md:text-[15px] font-bold tracking-tight truncate">{m.name}</h4>
-                    <Badge variant="active" size="sm" className="mt-1 truncate max-w-full">{m.role}</Badge>
-                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-2">{new Date(m.joined_at).toLocaleDateString()}</p>
+                ))}
+              </div>
+
+              {(isOwner || isMember) && (
+                <div className="bg-white border border-gray-200 rounded-2xl p-5 md:p-6 space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Tavsiya</h3>
+                    <Badge variant="default">{memberRecommendations.length}</Badge>
+                  </div>
+                  <p className="text-[12px] text-gray-500">
+                    Startupga kerakli mutaxassislar asosida mos nomzodlar.
+                  </p>
+                  <div className="space-y-3">
+                    {memberRecommendations.map((candidate) => (
+                      <div key={candidate.id} className="border border-gray-100 rounded-xl p-3 md:p-4 flex items-center justify-between gap-3">
+                        <button
+                          onClick={() => handleOpenUserProfile(candidate.id)}
+                          className="flex items-center gap-3 min-w-0 text-left"
+                        >
+                          <img
+                            src={candidate.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(candidate.name || 'User')}&background=111&color=fff`}
+                            className="w-11 h-11 rounded-xl object-cover border border-gray-100 shrink-0"
+                            alt={candidate.name}
+                          />
+                          <div className="min-w-0">
+                            <p className="text-[13px] font-bold truncate">{candidate.name}</p>
+                            <p className="text-[11px] text-gray-500 truncate">
+                              Moslik: {candidate.match_score} | {(candidate.matched_specialties || []).join(', ')}
+                            </p>
+                          </div>
+                        </button>
+                        <Button
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => handleSendStartupInvite(candidate)}
+                        >
+                          Taklif qilish
+                        </Button>
+                      </div>
+                    ))}
+                    {memberRecommendations.length === 0 && (
+                      <p className="text-[12px] text-gray-500">Hozircha mos tavsiya topilmadi.</p>
+                    )}
                   </div>
                 </div>
-              ))}
+              )}
             </div>
           )}
 
@@ -2613,22 +2917,55 @@ const App = () => {
         </header>
 
         <div className="space-y-3 px-2">
-          {userNotifications.map(n => (
-            <div 
-              key={n.id} 
-              onClick={() => handleMarkAsRead(n.id)}
-              className={`p-4 md:p-5 rounded-xl border flex items-start gap-3 md:gap-4 transition-all cursor-pointer ${n.is_read ? 'bg-white border-gray-100 opacity-60' : 'bg-gray-50 border-black shadow-sm'}`}
-            >
-              <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center shrink-0 ${n.type === 'success' ? 'bg-emerald-100 text-emerald-700' : n.type === 'danger' ? 'bg-rose-100 text-rose-700' : 'bg-black text-white'}`}>
-                <i className={`fa-solid ${n.type === 'success' ? 'fa-check' : n.type === 'danger' ? 'fa-triangle-exclamation' : 'fa-info'} text-[12px] md:text-sm`}></i>
+          {userNotifications.map(n => {
+            const invitation = invitationByNotification[n.id] || null;
+            return (
+              <div 
+                key={n.id} 
+                onClick={() => handleMarkAsRead(n.id)}
+                className={`p-4 md:p-5 rounded-xl border flex items-start gap-3 md:gap-4 transition-all cursor-pointer ${n.is_read ? 'bg-white border-gray-100 opacity-60' : 'bg-gray-50 border-black shadow-sm'}`}
+              >
+                <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center shrink-0 ${n.type === 'success' ? 'bg-emerald-100 text-emerald-700' : n.type === 'danger' ? 'bg-rose-100 text-rose-700' : 'bg-black text-white'}`}>
+                  <i className={`fa-solid ${n.type === 'success' ? 'fa-check' : n.type === 'danger' ? 'fa-triangle-exclamation' : 'fa-info'} text-[12px] md:text-sm`}></i>
+                </div>
+                <div className="flex-grow min-w-0">
+                  <h5 className="text-[13px] md:text-[14px] font-bold italic mb-1 truncate">{n.title}</h5>
+                  <p className="text-[12px] md:text-[13px] text-gray-500 leading-relaxed mb-2 line-clamp-3">{n.text}</p>
+                  {invitation && invitation.status === 'pending' && (
+                    <div className="bg-white border border-blue-100 rounded-lg p-3 mb-2 space-y-2">
+                      <p className="text-[12px] font-semibold text-gray-700">
+                        Sizni <span className="text-blue-700">{invitation.startup_name}</span> startupiga taklif qilishdi.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          className="h-8 px-4"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRespondInvitation(invitation.id, 'accept', n.id);
+                          }}
+                        >
+                          Qo'shilish
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          className="h-8 px-4"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRespondInvitation(invitation.id, 'reject', n.id);
+                          }}
+                        >
+                          Rad etish
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest">{new Date(n.created_at).toLocaleString()}</p>
+                </div>
               </div>
-              <div className="flex-grow min-w-0">
-                <h5 className="text-[13px] md:text-[14px] font-bold italic mb-1 truncate">{n.title}</h5>
-                <p className="text-[12px] md:text-[13px] text-gray-500 leading-relaxed mb-2 line-clamp-3">{n.text}</p>
-                <p className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest">{new Date(n.created_at).toLocaleString()}</p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {userNotifications.length === 0 && (
             <EmptyState icon="fa-bell-slash" title="Bildirishnomalar yo'q" />
           )}
@@ -2662,6 +2999,15 @@ const App = () => {
                 <p className="text-[9px] uppercase tracking-[0.2em] font-bold text-slate-500 mt-1">{activeTabTitle}</p>
               </div>
               <div className="flex items-center gap-2">
+                {currentUser ? (
+                  <button onClick={handleLogout} className="h-10 px-3 rounded-full border border-rose-200 bg-rose-50 text-rose-700 text-[12px] font-bold">
+                    Chiqish
+                  </button>
+                ) : (
+                  <button onClick={() => openAuth('login')} className="h-10 px-3 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 text-[12px] font-bold">
+                    Kirish
+                  </button>
+                )}
                 {!isProUser && proEnabled && (
                   <button onClick={() => setShowProModal(true)} className="h-10 px-3 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-[12px] font-bold">
                     Pro
@@ -2727,17 +3073,17 @@ const App = () => {
         {/* AI MENTOR FAB */}
         <button 
            onClick={() => setShowAIMentor(!showAIMentor)}
-           className={`fixed bottom-24 right-6 md:bottom-8 md:right-8 w-12 h-12 md:w-14 md:h-14 bg-black text-white flex items-center justify-center text-xl rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all z-[110] border-4 border-white ${showAIMentor ? 'rotate-[135deg] bg-rose-600' : ''}`}
+           className={`fixed bottom-24 right-6 md:bottom-8 md:right-8 w-14 h-14 md:w-16 md:h-16 bg-gradient-to-br from-cyan-500 to-blue-600 text-white flex items-center justify-center text-xl rounded-[22px] shadow-2xl hover:scale-105 active:scale-95 transition-all z-[110] border border-white/80 ${showAIMentor ? 'from-rose-500 to-pink-600' : ''}`}
         >
-           <i className={`fa-solid ${showAIMentor ? 'fa-plus' : 'fa-sparkles'} text-sm md:text-lg`}></i>
+           <i className={`fa-solid ${showAIMentor ? 'fa-xmark' : 'fa-robot'} text-lg md:text-xl`}></i>
         </button>
 
         {showAIMentor && (
           <div className="fixed bottom-32 right-4 left-4 md:left-auto md:bottom-28 md:right-8 md:w-[400px] h-[500px] md:h-[600px] bg-white border border-gray-100 shadow-2xl rounded-2xl flex flex-col z-[100] animate-in slide-in-from-bottom-8 duration-300 overflow-hidden">
-             <div className="p-4 md:p-5 bg-black flex items-center justify-between text-white shrink-0">
+             <div className="p-4 md:p-5 bg-gradient-to-r from-cyan-600 to-blue-700 flex items-center justify-between text-white shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-sm"><i className="fa-solid fa-microchip"></i></div>
-                  <h4 className="text-[11px] md:text-[13px] font-extrabold uppercase tracking-widest italic">AI Mentor</h4>
+                  <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-sm"><i className="fa-solid fa-robot"></i></div>
+                  <h4 className="text-[11px] md:text-[13px] font-extrabold uppercase tracking-widest italic">AI Ustoz</h4>
                 </div>
                 <button onClick={() => setShowAIMentor(false)} className="text-white/40 hover:text-white transition-colors p-2 -mr-2"><i className="fa-solid fa-xmark text-lg"></i></button>
              </div>

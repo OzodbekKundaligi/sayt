@@ -339,11 +339,48 @@ const init = async () => {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS startup_chat_messages (
+      id TEXT PRIMARY KEY,
+      startup_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      sender_name TEXT NOT NULL,
+      message_type TEXT DEFAULT 'text',
+      content TEXT,
+      file_name TEXT,
+      file_url TEXT,
+      created_at TEXT,
+      FOREIGN KEY (startup_id) REFERENCES startups(id),
+      FOREIGN KEY (sender_id) REFERENCES users(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS startup_invitations (
+      id TEXT PRIMARY KEY,
+      startup_id TEXT NOT NULL,
+      startup_name TEXT NOT NULL,
+      inviter_id TEXT NOT NULL,
+      inviter_name TEXT NOT NULL,
+      invitee_id TEXT NOT NULL,
+      invitee_name TEXT NOT NULL,
+      role_hint TEXT,
+      status TEXT DEFAULT 'pending',
+      notification_id TEXT,
+      created_at TEXT,
+      responded_at TEXT,
+      FOREIGN KEY (startup_id) REFERENCES startups(id),
+      FOREIGN KEY (inviter_id) REFERENCES users(id),
+      FOREIGN KEY (invitee_id) REFERENCES users(id)
+    )
+  `);
+
   await ensureColumn('users', 'banned', 'INTEGER DEFAULT 0');
   await ensureColumn('users', 'is_pro', 'INTEGER DEFAULT 0');
   await ensureColumn('users', 'pro_status', `TEXT DEFAULT 'free'`);
   await ensureColumn('users', 'pro_updated_at', 'TEXT');
   await ensureColumn('users', 'banner', 'TEXT');
+  await ensureColumn('notifications', 'meta', 'TEXT');
   await ensureColumn('startups', 'segment', `TEXT DEFAULT 'IT Founder + Developer'`);
   await ensureColumn('startups', 'lifecycle_status', `TEXT DEFAULT 'live'`);
   await ensureColumn('startups', 'success_fee_percent', 'REAL DEFAULT 1.5');
