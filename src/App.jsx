@@ -233,11 +233,13 @@ const App = () => {
   // Modals & Edit States
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [editedUser, setEditedUser] = useState({});
+  const [editedSkillsText, setEditedSkillsText] = useState('');
   const [tempFileBase64, setTempFileBase64] = useState(null);
   const [tempBannerBase64, setTempBannerBase64] = useState(null);
   const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
   const [viewedUser, setViewedUser] = useState(null);
   const [viewedUserReputation, setViewedUserReputation] = useState(null);
+  const [isDarkTheme, setIsDarkTheme] = useState(() => localStorage.getItem('garajhub_theme') === 'dark');
 
   const chatEndRef = useRef(null);
   const startupChatEndRef = useRef(null);
@@ -251,6 +253,36 @@ const App = () => {
   const openAuth = (mode = 'login') => {
     setAuthMode(mode);
     setShowAuthModal(true);
+  };
+
+  const parseSkillsInput = (raw) => {
+    const value = String(raw || '').trim();
+    if (!value) return [];
+    if (/[,\n;|]/.test(value)) {
+      return value
+        .split(/[,\n;|]+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+    }
+    return value
+      .split(/\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  };
+
+  const openEditProfileModal = () => {
+    if (!currentUser) return;
+    setEditedUser(currentUser);
+    setEditedSkillsText(Array.isArray(currentUser.skills) ? currentUser.skills.join(', ') : String(currentUser.skills || ''));
+    setIsEditProfileModalOpen(true);
+  };
+
+  const closeEditProfileModal = () => {
+    setIsEditProfileModalOpen(false);
+    setEditedUser({});
+    setEditedSkillsText('');
+    setTempFileBase64(null);
+    setTempBannerBase64(null);
   };
 
   const getAdminProfile = () => {
@@ -397,6 +429,10 @@ const App = () => {
     if (activeDetailTab !== 'chat') return;
     startupChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [startupChatMessages, activeDetailTab]);
+
+  useEffect(() => {
+    localStorage.setItem('garajhub_theme', isDarkTheme ? 'dark' : 'light');
+  }, [isDarkTheme]);
 
   useEffect(() => {
     if (activeTab === 'admin' && currentUser?.role === 'admin') {
@@ -943,7 +979,11 @@ const App = () => {
 
   const handleUpdateProfile = async () => {
     if (!currentUser) return;
-    const updatedUser = { ...currentUser, ...editedUser };
+    const updatedUser = {
+      ...currentUser,
+      ...editedUser,
+      skills: parseSkillsInput(editedSkillsText)
+    };
     try {
       if (currentUser.id === 'admin') {
         const adminUpdated = { ...getAdminProfile(), ...updatedUser, id: 'admin', role: 'admin', is_pro: true, pro_status: 'pro' };
@@ -956,13 +996,10 @@ const App = () => {
         setCurrentUser(savedUser);
       }
 
-      setIsEditProfileModalOpen(false);
-      setEditedUser({});
-      setTempFileBase64(null);
-      setTempBannerBase64(null);
+      closeEditProfileModal();
       alert('Profil muvaffaqiyatli yangilandi!');
     } catch (e) {
-      alert("Profilni saqlashda xatolik bo'ldi. Qayta urinib ko'ring.");
+      alert(e?.message || "Profilni saqlashda xatolik bo'ldi. Qayta urinib ko'ring.");
     }
   };
 
@@ -2508,7 +2545,7 @@ const App = () => {
             )}
             <div className="absolute inset-0 bg-black/15" />
             <button
-              onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }}
+              onClick={openEditProfileModal}
               className="absolute top-4 right-4 bg-white/80 border border-white rounded-full h-9 w-9 flex items-center justify-center text-gray-700 hover:bg-white transition"
               title="Banner tahrirlash"
             >
@@ -2520,7 +2557,7 @@ const App = () => {
             <div className="flex flex-col md:flex-row md:items-end gap-5">
               <div className="relative group/avatar">
                 <img src={currentUser.avatar} className="w-24 h-24 md:w-28 md:h-28 rounded-2xl border-4 border-white shadow-xl object-cover" alt="Profile" />
-                <button onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }} className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center text-white opacity-0 group-hover/avatar:opacity-100 transition-all"><i className="fa-solid fa-camera"></i></button>
+                <button onClick={openEditProfileModal} className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center text-white opacity-0 group-hover/avatar:opacity-100 transition-all"><i className="fa-solid fa-camera"></i></button>
               </div>
               <div className="flex-grow">
                 <div className="flex flex-wrap items-center gap-2">
@@ -2536,7 +2573,8 @@ const App = () => {
                 {!currentUser.is_pro && proEnabled && (
                   <Button onClick={() => setShowProModal(true)} className="h-10" icon="fa-crown">Pro</Button>
                 )}
-                <Button onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }} variant="secondary" size="md" className="h-10">Tahrirlash</Button>
+                <Button onClick={openEditProfileModal} variant="secondary" size="md" className="h-10">Tahrirlash</Button>
+                <Button onClick={handleLogout} variant="danger" size="md" className="h-10">Chiqish</Button>
                 {currentUser.portfolio_url && <Button variant="ghost" icon="fa-link" onClick={() => window.open(currentUser.portfolio_url, '_blank')} className="h-10 border border-gray-100" />}
               </div>
             </div>
@@ -2986,7 +3024,7 @@ const App = () => {
   }
 
   return (
-    <div className="app-shell flex h-screen text-gray-900 selection:bg-emerald-700 selection:text-white overflow-hidden">
+    <div className={`app-shell ${isDarkTheme ? 'theme-dark' : ''} flex h-screen text-gray-900 selection:bg-emerald-700 selection:text-white overflow-hidden`}>
       <main className="flex-grow flex flex-col overflow-hidden relative">
         <header className="sticky top-0 z-50 px-3 md:px-8 pt-3 md:pt-4 pb-2">
           <div className="max-w-[1180px] mx-auto space-y-3">
@@ -2999,11 +3037,7 @@ const App = () => {
                 <p className="text-[9px] uppercase tracking-[0.2em] font-bold text-slate-500 mt-1">{activeTabTitle}</p>
               </div>
               <div className="flex items-center gap-2">
-                {currentUser ? (
-                  <button onClick={handleLogout} className="h-10 px-3 rounded-full border border-rose-200 bg-rose-50 text-rose-700 text-[12px] font-bold">
-                    Chiqish
-                  </button>
-                ) : (
+                {!currentUser && (
                   <button onClick={() => openAuth('login')} className="h-10 px-3 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 text-[12px] font-bold">
                     Kirish
                   </button>
@@ -3018,8 +3052,12 @@ const App = () => {
                     Admin
                   </button>
                 )}
-                <button className="relative h-10 w-10 rounded-full border border-slate-200 bg-slate-100 text-slate-700">
-                  <i className="fa-regular fa-moon"></i>
+                <button
+                  onClick={() => setIsDarkTheme((prev) => !prev)}
+                  className="relative h-10 w-10 rounded-full border border-slate-200 bg-slate-100 text-slate-700"
+                  title="Fon rejimini almashtirish"
+                >
+                  <i className={`fa-regular ${isDarkTheme ? 'fa-sun' : 'fa-moon'}`}></i>
                 </button>
                 <button onClick={() => navigateTo('inbox')} className="relative h-10 w-10 rounded-full border border-slate-200 bg-slate-100 text-slate-700">
                   <i className="fa-regular fa-bell"></i>
@@ -3163,7 +3201,7 @@ const App = () => {
       )}
 
       {/* EDIT PROFILE MODAL */}
-      <Modal isOpen={isEditProfileModalOpen} onClose={() => { setIsEditProfileModalOpen(false); setEditedUser({}); setTempFileBase64(null); setTempBannerBase64(null); }} title="Profilni tahrirlash">
+      <Modal isOpen={isEditProfileModalOpen} onClose={closeEditProfileModal} title="Profilni tahrirlash">
         <div className="space-y-6 md:space-y-8">
           <FileUpload label="Profil banneri" onChange={handleBannerChange} preview={tempBannerBase64 || editedUser.banner || currentUser?.banner} icon="fa-image" />
           <FileUpload label="Profil rasmi" onChange={handleFileChange} preview={editedUser.avatar || currentUser?.avatar} />
@@ -3172,11 +3210,22 @@ const App = () => {
             <Input label="Telefon" value={editedUser.phone || currentUser?.phone || ''} onChange={(e) => setEditedUser(prev => ({ ...prev, phone: e.target.value }))} icon="fa-phone" />
           </div>
           <TextArea label="Qisqacha bio" value={editedUser.bio || currentUser?.bio || ''} onChange={(e) => setEditedUser(prev => ({ ...prev, bio: e.target.value }))} placeholder="Sizning startup tajribangiz..." />
-          <Input label="Ko'nikmalar" value={editedUser.skills?.join(', ') || currentUser?.skills?.join(', ') || ''} onChange={(e) => setEditedUser(prev => ({ ...prev, skills: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) }))} helper="Vergul bilan ajrating" icon="fa-bolt" placeholder="React, Node.js, UI/UX" />
+          <Input
+            label="Ko'nikmalar"
+            value={editedSkillsText}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setEditedSkillsText(raw);
+              setEditedUser((prev) => ({ ...prev, skills: parseSkillsInput(raw) }));
+            }}
+            helper="Vergul, probel yoki yangi qator bilan ajrating"
+            icon="fa-bolt"
+            placeholder="frontend backend, ui ux, python"
+          />
           <Input label="Portfolio" value={editedUser.portfolio_url || currentUser?.portfolio_url || ''} onChange={(e) => setEditedUser(prev => ({ ...prev, portfolio_url: e.target.value }))} placeholder="https://..." icon="fa-link" />
           
           <div className="flex flex-col sm:flex-row gap-3 md:gap-4 pt-4">
-             <Button variant="secondary" className="w-full h-12 md:h-10" onClick={() => { setIsEditProfileModalOpen(false); setEditedUser({}); setTempFileBase64(null); setTempBannerBase64(null); }}>Bekor qilish</Button>
+             <Button variant="secondary" className="w-full h-12 md:h-10" onClick={closeEditProfileModal}>Bekor qilish</Button>
              <Button className="w-full h-12 md:h-10" onClick={handleUpdateProfile}>Saqlash</Button>
           </div>
         </div>
@@ -3197,7 +3246,7 @@ const App = () => {
               label="Karta egasining ism-familiyasi"
               value={proRequestDraft.sender_full_name}
               onChange={(e) => setProRequestDraft((p) => ({ ...p, sender_full_name: e.target.value }))}
-              placeholder="Ali Valiyev"
+              placeholder="Ozodbek Mamatov"
               icon="fa-id-card"
             />
             <Input
@@ -3305,10 +3354,25 @@ const App = () => {
             linear-gradient(180deg, var(--surface-1), var(--surface-2));
         }
 
+        .app-shell.theme-dark {
+          --surface-1: #0b1220;
+          --surface-2: #111827;
+          background:
+            radial-gradient(circle at 8% 8%, rgba(59, 130, 246, 0.18), transparent 42%),
+            radial-gradient(circle at 88% 12%, rgba(14, 165, 233, 0.16), transparent 36%),
+            linear-gradient(180deg, var(--surface-1), var(--surface-2));
+        }
+
         .ios-topbar,
         .ios-navbar {
           backdrop-filter: blur(18px) saturate(1.15);
           -webkit-backdrop-filter: blur(18px) saturate(1.15);
+        }
+
+        .app-shell.theme-dark .ios-topbar,
+        .app-shell.theme-dark .ios-navbar {
+          background: rgba(15, 23, 42, 0.78) !important;
+          border-color: rgba(148, 163, 184, 0.28) !important;
         }
 
         .ios-topbar {
