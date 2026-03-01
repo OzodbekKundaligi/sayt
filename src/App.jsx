@@ -7,7 +7,6 @@ import Logo from './r.png';
 const ADMIN_EMAIL = 'mamatovo354@gmail.com';
 const ADMIN_PASS = '123@Ozod';
 const DEFAULT_CATEGORIES = ["Fintech", "Edtech", "AI/ML", "E-commerce", "SaaS", "Blockchain", "Healthcare", "Cybersecurity", "GameDev", "Networking", "Productivity", "Other"];
-const DEFAULT_SEGMENTS = ["IT Founder + Developer", "IT Founder + Designer", "IT Founder + Marketer", "IT Founder + Hardware"];
 
 // --- REUSABLE UI COMPONENTS ---
 const Badge = ({ children, variant = 'default', size = 'sm', className = "" }) => {
@@ -153,7 +152,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('explore');
   const [selectedStartupId, setSelectedStartupId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState('Hammasi');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState('login');
@@ -163,7 +162,6 @@ const App = () => {
   const [aiLoading, setAiLoading] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState('vazifalar');
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
-  const [selectedSegment, setSelectedSegment] = useState('IT Founder + Developer');
   const [adminTab, setAdminTab] = useState('moderation');
   const [adminStats, setAdminStats] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -230,6 +228,9 @@ const App = () => {
   const [editedUser, setEditedUser] = useState({});
   const [tempFileBase64, setTempFileBase64] = useState(null);
   const [tempBannerBase64, setTempBannerBase64] = useState(null);
+  const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
+  const [viewedUser, setViewedUser] = useState(null);
+  const [viewedUserReputation, setViewedUserReputation] = useState(null);
 
   const chatEndRef = useRef(null);
 
@@ -241,6 +242,32 @@ const App = () => {
   const openAuth = (mode = 'login') => {
     setAuthMode(mode);
     setShowAuthModal(true);
+  };
+
+  const getAdminProfile = () => {
+    const baseAdmin = {
+      id: 'admin',
+      email: ADMIN_EMAIL,
+      name: 'Ozodbek Mamatov',
+      phone: '+998932303410',
+      role: 'admin',
+      created_at: new Date().toISOString(),
+      skills: [],
+      languages: [],
+      tools: [],
+      avatar: `https://ui-avatars.com/api/?name=Ozodbek+Mamatov&background=111&color=fff`,
+      banner: '',
+      is_pro: true,
+      pro_status: 'pro'
+    };
+    try {
+      const raw = localStorage.getItem('adminProfile');
+      if (!raw) return baseAdmin;
+      const parsed = JSON.parse(raw);
+      return { ...baseAdmin, ...parsed, id: 'admin', role: 'admin', is_pro: true, pro_status: 'pro' };
+    } catch {
+      return baseAdmin;
+    }
   };
 
   const loadInitialData = async () => {
@@ -279,21 +306,7 @@ const App = () => {
       const savedUserId = localStorage.getItem('currentUserId');
       if (savedUserId) {
         if (savedUserId === 'admin') {
-          const admin = {
-            id: 'admin',
-            email: ADMIN_EMAIL,
-            name: 'Ozodbek Mamatov',
-            phone: '+998932303410',
-            role: 'admin',
-            created_at: new Date().toISOString(),
-            skills: [],
-            languages: [],
-            tools: [],
-            avatar: `https://ui-avatars.com/api/?name=Ozodbek+Mamatov&background=111&color=fff`,
-            banner: '',
-            is_pro: true,
-            pro_status: 'pro'
-          };
+          const admin = getAdminProfile();
           setCurrentUser(admin);
           const userNotifs = await dbOperations.getNotifications('admin').catch(() => []);
           setNotifications(Array.isArray(userNotifs) ? userNotifs : []);
@@ -488,21 +501,7 @@ const App = () => {
 
     if (authMode === 'login') {
       if (email === ADMIN_EMAIL && pass === ADMIN_PASS) {
-        const admin = { 
-          id: 'admin', 
-          email, 
-          name: 'Ozodbek Mamatov', 
-          phone: '+998932303410', 
-          role: 'admin', 
-          created_at: new Date().toISOString(), 
-          skills: [], 
-          languages: [], 
-          tools: [],
-          avatar: `https://ui-avatars.com/api/?name=Ozodbek+Mamatov&background=111&color=fff`,
-          banner: '',
-          is_pro: true,
-          pro_status: 'pro'
-        };
+        const admin = getAdminProfile();
         setCurrentUser(admin);
         localStorage.setItem('currentUserId', 'admin');
         navigateTo('admin');
@@ -875,7 +874,6 @@ const App = () => {
       views: 0,
       github_url: fd.get('github_url') || '',
       website_url: fd.get('website_url') || '',
-      segment: fd.get('segment') || 'IT Founder + Developer',
       lifecycle_status: 'live',
       success_fee_percent: 1.5,
       registry_notes: ''
@@ -901,17 +899,49 @@ const App = () => {
   const handleUpdateProfile = async () => {
     if (!currentUser) return;
     const updatedUser = { ...currentUser, ...editedUser };
-    
-    const savedUser = await dbOperations.updateUser(currentUser.id, updatedUser);
-    
-    setAllUsers(prev => prev.map(u => u.id === currentUser.id ? savedUser : u));
-    setCurrentUser(savedUser);
-    
-    setIsEditProfileModalOpen(false);
-    setEditedUser({});
-    setTempFileBase64(null);
-    setTempBannerBase64(null);
-    alert('Profil muvaffaqiyatli yangilandi!');
+    try {
+      if (currentUser.id === 'admin') {
+        const adminUpdated = { ...getAdminProfile(), ...updatedUser, id: 'admin', role: 'admin', is_pro: true, pro_status: 'pro' };
+        localStorage.setItem('adminProfile', JSON.stringify(adminUpdated));
+        setCurrentUser(adminUpdated);
+      } else {
+        const savedUser = await dbOperations.updateUser(currentUser.id, updatedUser);
+        if (!savedUser) throw new Error('Profil saqlanmadi');
+        setAllUsers(prev => prev.map(u => u.id === currentUser.id ? savedUser : u));
+        setCurrentUser(savedUser);
+      }
+
+      setIsEditProfileModalOpen(false);
+      setEditedUser({});
+      setTempFileBase64(null);
+      setTempBannerBase64(null);
+      alert('Profil muvaffaqiyatli yangilandi!');
+    } catch (e) {
+      alert("Profilni saqlashda xatolik bo'ldi. Qayta urinib ko'ring.");
+    }
+  };
+
+  const handleOpenUserProfile = async (userId) => {
+    if (!userId) return;
+    try {
+      let user = null;
+      if (userId === 'admin') {
+        user = getAdminProfile();
+      } else {
+        user = allUsers.find((u) => u.id === userId) || await dbOperations.getUserById(userId);
+      }
+      if (!user) return alert('Foydalanuvchi topilmadi.');
+      setViewedUser(user);
+      setIsUserProfileModalOpen(true);
+      if (userId !== 'admin') {
+        const rep = await dbOperations.getUserReputation(userId).catch(() => null);
+        setViewedUserReputation(rep);
+      } else {
+        setViewedUserReputation(null);
+      }
+    } catch (e) {
+      alert("Profilni ochishda xatolik bo'ldi.");
+    }
   };
 
   const handleAddTask = async (startupId) => {
@@ -1262,11 +1292,10 @@ const App = () => {
   const filtered = useMemo(() => {
     return startups.filter(s => 
       s.status === 'approved' && 
-      (selectedSegment === 'All' || (s.segment || 'IT Founder + Developer') === selectedSegment) &&
-      (selectedCategory === 'All' || s.category === selectedCategory) &&
+      (selectedCategory === 'Hammasi' || s.category === selectedCategory) &&
       (s.nomi.toLowerCase().includes(searchTerm.toLowerCase()) || s.tavsif.toLowerCase().includes(searchTerm.toLowerCase()))
     );
-  }, [startups, selectedCategory, selectedSegment, searchTerm]);
+  }, [startups, selectedCategory, searchTerm]);
 
   const myStartups = useMemo(() => 
     currentUser ? startups.filter(s => s.egasi_id === currentUser.id || s.a_zolar.some(m => m.user_id === currentUser.id)) : [], 
@@ -1313,7 +1342,7 @@ const App = () => {
         </div>
         <h3 className="text-lg font-black tracking-tight">{title}</h3>
         <p className="text-[13px] text-gray-500">
-          {proConfig?.plan_name || 'GarajHub Pro'} bilan ushbu bo'limlar ochiladi. To'lovni yuborib upgrade qiling.
+          {proConfig?.plan_name || 'GarajHub Pro'} bilan ushbu bo'limlar ochiladi. To'lov yuborib Pro holatga o'ting.
         </p>
         <div className="flex justify-center">
           <Button onClick={() => setShowProModal(true)} className="px-7">Pro ga o'tish</Button>
@@ -1326,9 +1355,19 @@ const App = () => {
     { key: 'explore', label: 'Kashf', icon: 'fa-compass' },
     { key: 'my-projects', label: 'Loyiha', icon: 'fa-layer-group', auth: true },
     { key: 'create', label: 'Yarat', icon: 'fa-plus' },
-    { key: 'inbox', label: 'Inbox', icon: 'fa-bell', auth: true },
+    { key: 'inbox', label: 'Xabar', icon: 'fa-bell', auth: true },
     { key: 'profile', label: 'Profil', icon: 'fa-user', auth: true }
   ];
+  const activeTabTitle = {
+    explore: 'Kashfiyot',
+    'my-projects': 'Loyihalarim',
+    create: 'Yaratish',
+    inbox: 'Xabarlar',
+    profile: 'Profil',
+    details: 'Loyiha',
+    requests: "So'rovlar",
+    admin: 'Boshqaruv'
+  }[activeTab] || activeTab;
 
   // --- RENDERERS ---
 
@@ -1411,18 +1450,7 @@ const App = () => {
           />
         </div>
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 pb-2 md:mx-0 md:px-0">
-          {['All', ...DEFAULT_SEGMENTS].map(seg => (
-            <button
-              key={seg}
-              onClick={() => setSelectedSegment(seg)}
-              className={`h-8 px-4 rounded-full text-[11px] font-semibold border transition-all whitespace-nowrap ${selectedSegment === seg ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-emerald-600 hover:text-emerald-700'}`}
-            >
-              {seg}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 pb-2 md:mx-0 md:px-0">
-          {['All', ...categories].map(c => (
+          {['Hammasi', ...categories].map(c => (
             <button 
               key={c} onClick={() => setSelectedCategory(c)} 
               className={`h-8 px-4 rounded-full text-[12px] font-semibold border transition-all whitespace-nowrap ${selectedCategory === c ? 'bg-black border-black text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-black'}`}
@@ -1438,10 +1466,7 @@ const App = () => {
           <div key={s.id} onClick={() => navigateTo('details', s.id)} className="bg-white border border-gray-100 rounded-xl p-5 md:p-6 flex flex-col hover:border-black hover:shadow-lg transition-all group relative overflow-hidden cursor-pointer">
             <div className="flex items-start justify-between mb-4 md:mb-6">
               <img src={s.logo} className="w-12 h-12 md:w-14 md:h-14 bg-gray-50 object-cover rounded-lg border border-gray-100 shadow-sm" alt="Logo" />
-              <div className="flex flex-col items-end gap-2">
-                <Badge>{s.category}</Badge>
-                <span className="text-[9px] uppercase tracking-widest font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-full">{s.segment || 'IT Founder + Developer'}</span>
-              </div>
+              <Badge>{s.category}</Badge>
             </div>
             <div className="flex-grow space-y-2 md:space-y-3 mb-6 md:mb-8">
               <h3 className="text-base md:text-[18px] font-extrabold text-gray-900 tracking-tight leading-tight group-hover:pl-1 transition-all">{s.nomi}</h3>
@@ -1485,9 +1510,9 @@ const App = () => {
             <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
               <i className="fa-solid fa-crown text-xl"></i>
             </div>
-            <h2 className="text-2xl font-black tracking-tight">Free limit tugadi</h2>
+            <h2 className="text-2xl font-black tracking-tight">Bepul limit tugadi</h2>
             <p className="text-[14px] text-gray-600">
-              Free rejimda maksimal {freeStartupLimit} ta startup yaratish mumkin. Pro bo'lsangiz cheksiz startup yarata olasiz.
+              Bepul rejimda maksimal {freeStartupLimit} ta startup yaratish mumkin. Pro bo'lsangiz cheksiz startup yarata olasiz.
             </p>
             <div className="bg-slate-900 text-white rounded-2xl p-5">
               <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300 font-bold">{proConfig.plan_name}</p>
@@ -1523,11 +1548,7 @@ const App = () => {
           </div>
 
           <div className="space-y-1.5 w-full">
-            <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-widest ml-1">Fokus segment</label>
-            <select name="segment" defaultValue="IT Founder + Developer" className="w-full h-[44px] bg-white border border-gray-200 rounded-lg px-4 text-[14px] outline-none focus:border-emerald-600 shadow-sm">
-              {DEFAULT_SEGMENTS.map(seg => <option key={seg} value={seg}>{seg}</option>)}
-            </select>
-            <p className="text-[11px] text-gray-500 ml-1">Boshlanish uchun faqat IT founder + developer segmentini tavsiya qilamiz.</p>
+            <p className="text-[11px] text-gray-500 ml-1">Kategoriya va tavsifga e'tibor bering, keyin jamoangizni tuzasiz.</p>
           </div>
 
           <TextArea required name="tavsif" label="Tavsif" placeholder="Startupingizning asosiy maqsadi..." />
@@ -1613,7 +1634,6 @@ const App = () => {
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-3xl md:text-4xl font-extrabold tracking-tighter italic leading-none">{selectedStartup.nomi}</h1>
               <Badge variant="active" size="md">{selectedStartup.category}</Badge>
-              <Badge size="md" className="!bg-emerald-50 !border-emerald-200 !text-emerald-700">{selectedStartup.segment || 'IT Founder + Developer'}</Badge>
               <Badge variant={selectedStartup.status === 'approved' ? 'success' : 'default'} size="md">{selectedStartup.status === 'approved' ? 'Faol' : 'Moderatsiyada'}</Badge>
             </div>
             <p className="text-gray-500 text-[14px] md:text-[16px] max-w-2xl leading-relaxed italic">"{selectedStartup.tavsif}"</p>
@@ -1633,10 +1653,10 @@ const App = () => {
           {[
             { key: 'vazifalar', label: 'Vazifalar' },
             { key: 'reputatsiya', label: 'Reputatsiya' },
-            { key: 'governance', label: 'Governance' },
-            { key: 'kapital', label: 'Equity' },
-            { key: 'registry', label: 'Registry' },
-            { key: 'airadar', label: 'AI Radar' },
+            { key: 'governance', label: 'Boshqaruv' },
+            { key: 'kapital', label: 'Ulush' },
+            { key: 'registry', label: "Ro'yxat" },
+            { key: 'airadar', label: 'AI Tahlil' },
             { key: 'jamoa', label: 'Jamoa' },
             { key: 'sozlamalar', label: 'Sozlamalar' }
           ].map((tab) => (
@@ -1722,8 +1742,8 @@ const App = () => {
                     </div>
                     <div>
                       <p className="text-[15px] font-bold">{m.user_name}</p>
-                      <p className="text-[11px] text-gray-500">Avg rating: {m.avg_rating} / 5 ({m.reviews_count})</p>
-                      <p className="text-[11px] text-gray-500">Task completion: {m.completion_rate}%</p>
+                      <p className="text-[11px] text-gray-500">O'rtacha baho: {m.avg_rating} / 5 ({m.reviews_count})</p>
+                      <p className="text-[11px] text-gray-500">Vazifa bajarilishi: {m.completion_rate}%</p>
                     </div>
                   </div>
                 ))}
@@ -1743,7 +1763,7 @@ const App = () => {
                           onChange={(e) => setReviewDraft((p) => ({ ...p, to_user_id: e.target.value }))}
                           className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]"
                         >
-                          <option value="">Teammate tanlang</option>
+                          <option value="">Jamoa a'zosini tanlang</option>
                           {selectedStartup.a_zolar.filter((m) => m.user_id !== currentUser?.id).map((m) => (
                             <option key={m.user_id} value={m.user_id}>{m.name}</option>
                           ))}
@@ -1753,7 +1773,7 @@ const App = () => {
                           onChange={(e) => setReviewDraft((p) => ({ ...p, rating: Number(e.target.value) }))}
                           className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]"
                         >
-                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Overall rating: {s}</option>)}
+                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Umumiy baho: {s}</option>)}
                         </select>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1762,21 +1782,21 @@ const App = () => {
                           onChange={(e) => setReviewDraft((p) => ({ ...p, task_delivery: Number(e.target.value) }))}
                           className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]"
                         >
-                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Delivery {s}/5</option>)}
+                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Bajarish {s}/5</option>)}
                         </select>
                         <select
                           value={reviewDraft.collaboration}
                           onChange={(e) => setReviewDraft((p) => ({ ...p, collaboration: Number(e.target.value) }))}
                           className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]"
                         >
-                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Collab {s}/5</option>)}
+                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Hamkorlik {s}/5</option>)}
                         </select>
                         <select
                           value={reviewDraft.reliability}
                           onChange={(e) => setReviewDraft((p) => ({ ...p, reliability: Number(e.target.value) }))}
                           className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]"
                         >
-                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Reliability {s}/5</option>)}
+                          {[5, 4, 3, 2, 1].map((s) => <option key={s} value={s}>Ishonchlilik {s}/5</option>)}
                         </select>
                       </div>
                       <textarea
@@ -1793,12 +1813,12 @@ const App = () => {
                 </div>
 
                 <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
-                  <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Collaboration Graph</h3>
+                  <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Hamkorlik grafigi</h3>
                   <div className="space-y-3 max-h-[320px] overflow-y-auto custom-scrollbar pr-2">
                     {workspaceReputation.edges.map((edge, idx) => (
                       <div key={`${edge.source}_${edge.target}_${idx}`} className="bg-gray-50 border border-gray-100 rounded-xl p-3">
                         <p className="text-[12px] font-semibold text-gray-700">{`${edge.source} -> ${edge.target}`}</p>
-                        <p className="text-[11px] text-gray-500">Interactions: {edge.interactions} | Avg rating: {edge.avg_rating}</p>
+                        <p className="text-[11px] text-gray-500">Aloqalar: {edge.interactions} | O'rtacha baho: {edge.avg_rating}</p>
                       </div>
                     ))}
                     {workspaceReputation.edges.length === 0 && (
@@ -1813,7 +1833,7 @@ const App = () => {
                 {workspaceReviews.slice(0, 8).map((r) => (
                   <div key={r.id} className="border border-gray-100 rounded-xl p-4 bg-gray-50/60">
                       <p className="text-[12px] font-bold text-gray-800">{`${r.from_user_name} -> ${r.to_user_name}`}</p>
-                    <p className="text-[11px] text-gray-500">Overall {r.rating}/5 | Delivery {r.task_delivery}/5 | Collab {r.collaboration}/5 | Reliability {r.reliability}/5</p>
+                    <p className="text-[11px] text-gray-500">Umumiy {r.rating}/5 | Bajarish {r.task_delivery}/5 | Hamkorlik {r.collaboration}/5 | Ishonchlilik {r.reliability}/5</p>
                     {r.comment && <p className="text-[12px] text-gray-700 mt-2">{r.comment}</p>}
                     <p className="text-[10px] text-gray-400 mt-2">{new Date(r.created_at).toLocaleString()}</p>
                   </div>
@@ -1889,11 +1909,11 @@ const App = () => {
                         <Badge variant={d.status === 'approved' ? 'success' : d.status === 'rejected' ? 'danger' : 'default'}>{d.status}</Badge>
                       </div>
                       {d.description && <p className="text-[12px] text-gray-600 mt-2">{d.description}</p>}
-                      <p className="text-[11px] text-gray-500 mt-2">Approve: {d.votes?.approve || 0} | Reject: {d.votes?.reject || 0}</p>
+                      <p className="text-[11px] text-gray-500 mt-2">Tasdiq: {d.votes?.approve || 0} | Rad: {d.votes?.reject || 0}</p>
                       {d.status === 'open' && (isOwner || isMember) && (
                         <div className="flex gap-2 mt-3">
-                          <Button size="sm" onClick={() => handleVoteDecision(d.id, 'approve')}>Approve</Button>
-                          <Button size="sm" variant="danger" onClick={() => handleVoteDecision(d.id, 'reject')}>Reject</Button>
+                          <Button size="sm" onClick={() => handleVoteDecision(d.id, 'approve')}>Tasdiqlash</Button>
+                          <Button size="sm" variant="danger" onClick={() => handleVoteDecision(d.id, 'reject')}>Rad etish</Button>
                         </div>
                       )}
                     </div>
@@ -1923,7 +1943,7 @@ const App = () => {
                 </div>
               </div>
             </div>
-            ) : renderProLocked("Governance paneli Pro uchun")
+            ) : renderProLocked("Boshqaruv paneli Pro uchun")
           )}
 
           {activeDetailTab === 'kapital' && (
@@ -1931,13 +1951,13 @@ const App = () => {
             <div className="space-y-8">
               <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Equity Ledger</h3>
+                  <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Ulush daftari</h3>
                   <Badge variant={Math.round(equityTotal) === 100 ? 'success' : 'danger'}>{equityTotal.toFixed(2)}%</Badge>
                 </div>
                 <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
                   <div className={`h-full ${Math.round(equityTotal) === 100 ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ width: `${Math.min(equityTotal, 100)}%` }} />
                 </div>
-                <p className="text-[12px] text-gray-500">Ideal balans: 100%. Platforma equity nomutanosib bo'lsa AI Radar signal beradi.</p>
+                <p className="text-[12px] text-gray-500">Ideal balans: 100%. Ulush nomutanosib bo'lsa AI tahlil signal beradi.</p>
               </div>
 
               {isOwner && (
@@ -1948,12 +1968,12 @@ const App = () => {
                       <option value="">A'zo</option>
                       {selectedStartup.a_zolar.map((m) => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}
                     </select>
-                    <input type="number" value={equityDraft.share_percent} onChange={(e) => setEquityDraft((p) => ({ ...p, share_percent: e.target.value }))} placeholder="Share %" className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]" />
+                    <input type="number" value={equityDraft.share_percent} onChange={(e) => setEquityDraft((p) => ({ ...p, share_percent: e.target.value }))} placeholder="Ulush %" className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]" />
                     <input type="number" value={equityDraft.vesting_months} onChange={(e) => setEquityDraft((p) => ({ ...p, vesting_months: e.target.value }))} placeholder="Vesting oy" className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]" />
-                    <input type="number" value={equityDraft.cliff_months} onChange={(e) => setEquityDraft((p) => ({ ...p, cliff_months: e.target.value }))} placeholder="Cliff oy" className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]" />
+                    <input type="number" value={equityDraft.cliff_months} onChange={(e) => setEquityDraft((p) => ({ ...p, cliff_months: e.target.value }))} placeholder="Kutish oy" className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]" />
                     <Button onClick={handleUpsertEquity}>Saqlash</Button>
                   </div>
-                  <textarea value={equityDraft.notes} onChange={(e) => setEquityDraft((p) => ({ ...p, notes: e.target.value }))} placeholder="Equity note..." className="w-full min-h-[80px] border border-gray-200 rounded-lg p-3 text-[13px]" />
+                  <textarea value={equityDraft.notes} onChange={(e) => setEquityDraft((p) => ({ ...p, notes: e.target.value }))} placeholder="Ulush bo'yicha izoh..." className="w-full min-h-[80px] border border-gray-200 rounded-lg p-3 text-[13px]" />
                 </div>
               )}
 
@@ -1967,21 +1987,21 @@ const App = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant={e.status === 'active' ? 'success' : 'default'}>{e.status}</Badge>
-                      {isOwner && e.status !== 'archived' && <Button size="sm" variant="ghost" className="border border-gray-200" onClick={() => handleArchiveEquity(e.id)}>Archive</Button>}
+                      {isOwner && e.status !== 'archived' && <Button size="sm" variant="ghost" className="border border-gray-200" onClick={() => handleArchiveEquity(e.id)}>Arxiv</Button>}
                     </div>
                   </div>
                 ))}
-                {workspaceEquity.length === 0 && <p className="text-[12px] text-gray-500">Equity hali kiritilmagan.</p>}
+                {workspaceEquity.length === 0 && <p className="text-[12px] text-gray-500">Ulush hali kiritilmagan.</p>}
               </div>
             </div>
-            ) : renderProLocked("Equity ledger Pro uchun")
+            ) : renderProLocked("Ulush daftari Pro uchun")
           )}
 
           {activeDetailTab === 'registry' && (
             hasProAccess ? (
             <div className="space-y-8">
               <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
-                <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Startup Registry</h3>
+                <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Startup ro'yxati</h3>
                 {isOwner ? (
                   <>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1991,10 +2011,10 @@ const App = () => {
                         <option value="closed">closed</option>
                         <option value="acquired">acquired</option>
                       </select>
-                      <input type="number" step="0.1" value={registryDraft.success_fee_percent} onChange={(e) => setRegistryDraft((p) => ({ ...p, success_fee_percent: e.target.value }))} className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]" placeholder="Success fee %" />
-                      <Button onClick={handleUpdateRegistry}>Registry yangilash</Button>
+                      <input type="number" step="0.1" value={registryDraft.success_fee_percent} onChange={(e) => setRegistryDraft((p) => ({ ...p, success_fee_percent: e.target.value }))} className="h-10 px-3 border border-gray-200 rounded-lg text-[13px]" placeholder="Muvaffaqiyat foizi %" />
+                      <Button onClick={handleUpdateRegistry}>Ro'yxatni yangilash</Button>
                     </div>
-                    <textarea value={registryDraft.registry_notes} onChange={(e) => setRegistryDraft((p) => ({ ...p, registry_notes: e.target.value }))} className="w-full min-h-[90px] border border-gray-200 rounded-lg p-3 text-[13px]" placeholder="Safekeeping va startup registry izohi..." />
+                    <textarea value={registryDraft.registry_notes} onChange={(e) => setRegistryDraft((p) => ({ ...p, registry_notes: e.target.value }))} className="w-full min-h-[90px] border border-gray-200 rounded-lg p-3 text-[13px]" placeholder="Startup ro'yxati bo'yicha izoh..." />
                   </>
                 ) : (
                   <p className="text-[12px] text-gray-500">Lifecycle: {registryDraft.lifecycle_status} | Success fee: {registryDraft.success_fee_percent}%</p>
@@ -2073,7 +2093,7 @@ const App = () => {
                 </div>
               </div>
             </div>
-            ) : renderProLocked("Startup registry Pro uchun")
+            ) : renderProLocked("Startup ro'yxati Pro uchun")
           )}
 
           {activeDetailTab === 'airadar' && (
@@ -2125,13 +2145,17 @@ const App = () => {
                 <EmptyState icon="fa-brain" title="AI risk hisoblanmadi" subtitle="Workspace ma'lumotlarini to'ldiring va qayta urinib ko'ring." />
               )}
             </div>
-            ) : renderProLocked("AI Radar Pro uchun")
+            ) : renderProLocked("AI tahlil Pro uchun")
           )}
 
           {activeDetailTab === 'jamoa' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
               {selectedStartup.a_zolar.map((m, i) => (
-                <div key={i} className="bg-white border border-gray-100 rounded-xl p-5 md:p-6 flex items-center gap-4 md:gap-5 hover:border-black transition-all relative group min-w-0">
+                <div
+                  key={i}
+                  onClick={() => handleOpenUserProfile(m.user_id)}
+                  className="bg-white border border-gray-100 rounded-xl p-5 md:p-6 flex items-center gap-4 md:gap-5 hover:border-black transition-all relative group min-w-0 cursor-pointer"
+                >
                   <div className="w-10 h-10 md:w-12 md:h-12 bg-gray-50 border border-gray-100 rounded-full flex items-center justify-center text-[14px] md:text-[16px] font-black uppercase italic shadow-inner shrink-0">
                     {m.name[0]}
                   </div>
@@ -2221,9 +2245,9 @@ const App = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
           {[
             { val: myStartups.length, label: 'Loyihalar' },
-            { val: incomingRequests.length, label: 'So\'rovlar' },
-            { val: userNotifications.length, label: 'Notiflar' },
-            { val: myStartups.reduce((acc, s) => acc + (s.tasks?.length || 0), 0), label: 'Vazifalar' }
+            { val: myStartups.reduce((acc, s) => acc + (s.tasks?.length || 0), 0), label: 'Vazifalar' },
+            { val: profileReputation?.score ?? 0, label: 'Ball' },
+            { val: currentUser.is_pro ? 'Pro' : 'Oddiy', label: 'Reja' }
           ].map((s, i) => (
             <div key={i} className="bg-white border border-gray-100 rounded-xl p-4 md:p-6 text-center shadow-sm hover:border-black transition-all">
               <p className="text-xl md:text-3xl font-extrabold italic mb-1">{s.val}</p>
@@ -2239,7 +2263,7 @@ const App = () => {
                 <p className="text-[10px] uppercase tracking-[0.25em] font-bold text-white/80">Reputation Graph</p>
                 <h3 className="text-3xl md:text-4xl font-black mt-2">{profileReputation.score}/100</h3>
                 <p className="text-[13px] mt-2 text-white/90">
-                  Network: {profileReputation.stats?.network_size || 0} | Collaboration: {profileReputation.stats?.collaboration_count || 0} projects
+                  Tarmoq: {profileReputation.stats?.network_size || 0} | Hamkorlik: {profileReputation.stats?.collaboration_count || 0} loyiha
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3 w-full md:w-auto">
@@ -2249,7 +2273,7 @@ const App = () => {
                 </div>
                 <div className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-center">
                   <p className="text-xl font-black">{profileReputation.stats?.completion_rate || 0}%</p>
-                  <p className="text-[10px] uppercase tracking-widest">Delivery</p>
+                  <p className="text-[10px] uppercase tracking-widest">Bajarish</p>
                 </div>
               </div>
             </div>
@@ -2261,7 +2285,7 @@ const App = () => {
             <div>
               <p className="text-[11px] uppercase tracking-[0.2em] text-amber-600 font-bold">{proConfig.plan_name}</p>
               <h3 className="text-xl font-black mt-1">{proConfig.price_text}</h3>
-              <p className="text-[13px] text-gray-500 mt-2">Free rejim: {freeStartupLimit} ta startup. Pro bilan cheksiz va premium bo'limlar ochiladi.</p>
+              <p className="text-[13px] text-gray-500 mt-2">Bepul rejim: {freeStartupLimit} ta startup. Pro bilan cheksiz va premium bo'limlar ochiladi.</p>
             </div>
             <Button onClick={() => setShowProModal(true)} icon="fa-credit-card" className="h-11 px-7">To'lov yuborish</Button>
           </div>
@@ -2387,9 +2411,9 @@ const App = () => {
                     className="h-10 px-5"
                     onClick={() => handleAdminUserPro(u.id, !u.is_pro)}
                   >
-                    {u.is_pro ? 'Pro Off' : 'Pro On'}
+                    {u.is_pro ? "Pro o'chirish" : 'Pro yoqish'}
                   </Button>
-                  <Button variant="ghost" className="h-10 px-5 border border-gray-100" onClick={() => handleAdminUserDelete(u.id)}>Delete</Button>
+                  <Button variant="ghost" className="h-10 px-5 border border-gray-100" onClick={() => handleAdminUserDelete(u.id)}>O'chirish</Button>
                 </div>
               </div>
             ))}
@@ -2411,9 +2435,9 @@ const App = () => {
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                  <Button className="h-10 px-5" onClick={() => handleAdminStartupStatus(s.id, 'approved')}>Approve</Button>
-                  <Button variant="danger" className="h-10 px-5" onClick={() => handleAdminStartupStatus(s.id, 'rejected')}>Reject</Button>
-                  <Button variant="ghost" className="h-10 px-5 border border-gray-100" onClick={() => handleAdminStartupDelete(s.id)}>Delete</Button>
+                  <Button className="h-10 px-5" onClick={() => handleAdminStartupStatus(s.id, 'approved')}>Tasdiqlash</Button>
+                  <Button variant="danger" className="h-10 px-5" onClick={() => handleAdminStartupStatus(s.id, 'rejected')}>Rad etish</Button>
+                  <Button variant="ghost" className="h-10 px-5 border border-gray-100" onClick={() => handleAdminStartupDelete(s.id)}>O'chirish</Button>
                 </div>
               </div>
             ))}
@@ -2426,12 +2450,12 @@ const App = () => {
             <div className="bg-white border border-gray-200 rounded-2xl p-6 md:p-8 space-y-5">
               <div className="flex items-center justify-between gap-4">
                 <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Pro konfiguratsiya</h3>
-                <Badge variant={adminProConfigDraft.pro_enabled ? 'success' : 'danger'}>{adminProConfigDraft.pro_enabled ? 'ENABLED' : 'DISABLED'}</Badge>
+                <Badge variant={adminProConfigDraft.pro_enabled ? 'success' : 'danger'}>{adminProConfigDraft.pro_enabled ? 'YOQILGAN' : "O'CHIRILGAN"}</Badge>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input label="Plan nomi" value={adminProConfigDraft.plan_name} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, plan_name: e.target.value }))} />
                 <Input label="Narx matni" value={adminProConfigDraft.price_text} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, price_text: e.target.value }))} />
-                <Input label="Free startup limiti" type="number" value={adminProConfigDraft.startup_limit_free} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, startup_limit_free: Number(e.target.value || 1) }))} />
+                <Input label="Bepul startup limiti" type="number" value={adminProConfigDraft.startup_limit_free} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, startup_limit_free: Number(e.target.value || 1) }))} />
                 <div className="space-y-1.5">
                   <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-widest ml-1">Pro rejim</label>
                   <select className="w-full h-[44px] border border-gray-200 rounded-lg px-4 text-[14px]" value={adminProConfigDraft.pro_enabled ? 'on' : 'off'} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, pro_enabled: e.target.value === 'on' }))}>
@@ -2449,7 +2473,7 @@ const App = () => {
 
             <div className="bg-white border border-gray-200 rounded-2xl p-6 md:p-8 space-y-4">
               <div className="flex items-center justify-between gap-4">
-                <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Pending Pro to'lovlar</h3>
+                <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Kutilayotgan Pro to'lovlar</h3>
                 <Badge variant="danger">{proRequests.filter((r) => r.status === 'pending').length}</Badge>
               </div>
               {proRequests.filter((r) => r.status === 'pending').map((r) => (
@@ -2471,7 +2495,7 @@ const App = () => {
                   </div>
                 </div>
               ))}
-              {proRequests.filter((r) => r.status === 'pending').length === 0 && <EmptyState icon="fa-receipt" title="Pending cheklar yo'q" />}
+              {proRequests.filter((r) => r.status === 'pending').length === 0 && <EmptyState icon="fa-receipt" title="Kutilayotgan chek yo'q" />}
             </div>
           </div>
         )}
@@ -2494,13 +2518,13 @@ const App = () => {
         {adminTab === 'stats' && (
           <div className="grid grid-cols-2 md:grid-cols-7 gap-4 md:gap-6">
             {[
-              { val: stats.users, label: 'Users' },
-              { val: stats.startups, label: 'Startups' },
-              { val: stats.pending_startups, label: 'Pending' },
-              { val: stats.join_requests, label: 'Requests' },
-              { val: stats.notifications, label: 'Notifications' },
-              { val: stats.pro_users || 0, label: 'Pro Users' },
-              { val: stats.pending_pro_requests || 0, label: 'Pro Pending' }
+              { val: stats.users, label: 'Userlar' },
+              { val: stats.startups, label: 'Startup' },
+              { val: stats.pending_startups, label: 'Kutilmoqda' },
+              { val: stats.join_requests, label: "So'rov" },
+              { val: stats.notifications, label: 'Xabarnoma' },
+              { val: stats.pro_users || 0, label: 'Pro userlar' },
+              { val: stats.pending_pro_requests || 0, label: 'Pro kutish' }
             ].map((s, i) => (
               <div key={i} className="bg-white border border-gray-100 rounded-xl p-4 md:p-6 text-center shadow-sm hover:border-black transition-all">
                 <p className="text-xl md:text-3xl font-extrabold italic mb-1">{s.val}</p>
@@ -2557,6 +2581,7 @@ const App = () => {
                 <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{new Date(r.created_at).toLocaleDateString()}</p>
               </div>
               <div className="flex gap-3 w-full md:w-auto shrink-0">
+                <Button onClick={() => handleOpenUserProfile(r.user_id)} variant="secondary" className="flex-1 md:flex-none px-6 md:px-8 h-12">Profil</Button>
                 <Button onClick={() => handleRequestAction(r.id, 'accept')} className="flex-1 md:flex-none px-6 md:px-8 h-12">Qabul</Button>
                 <Button onClick={() => handleRequestAction(r.id, 'decline')} variant="danger" className="flex-1 md:flex-none px-6 md:px-8 h-12">Rad</Button>
               </div>
@@ -2634,7 +2659,7 @@ const App = () => {
                   <img src={Logo} alt="GarajHub" className="w-7 h-7 rounded-lg" />
                   <p className="text-[28px] leading-none font-black tracking-[-0.04em]">GarajHub</p>
                 </div>
-                <p className="text-[9px] uppercase tracking-[0.2em] font-bold text-slate-500 mt-1">{activeTab}</p>
+                <p className="text-[9px] uppercase tracking-[0.2em] font-bold text-slate-500 mt-1">{activeTabTitle}</p>
               </div>
               <div className="flex items-center gap-2">
                 {!isProUser && proEnabled && (
@@ -2656,36 +2681,11 @@ const App = () => {
                 </button>
               </div>
             </div>
-
-            <nav className="ios-navbar rounded-[22px] border border-slate-200/80 bg-white/85 backdrop-blur-xl p-1.5 shadow-md">
-              <div className="grid grid-cols-5 gap-1">
-                {topNavItems.map((item) => {
-                  const isActive = activeTab === item.key || (item.key === 'my-projects' && activeTab === 'details');
-                  const lockRequired = item.auth && !currentUser;
-                  return (
-                    <button
-                      key={item.key}
-                      onClick={() => {
-                        if (lockRequired) return openAuth('login');
-                        navigateTo(item.key);
-                      }}
-                      className={`relative h-[58px] rounded-[18px] flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-all ${isActive ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-slate-600 hover:bg-slate-100'}`}
-                    >
-                      <i className={`fa-solid ${item.icon} text-[15px]`}></i>
-                      <span>{item.label}</span>
-                      {item.key === 'inbox' && unreadNotifCount > 0 && (
-                        <span className="absolute top-2 right-3 h-4 min-w-[16px] px-1 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">{unreadNotifCount}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </nav>
           </div>
         </header>
 
         <section className="flex-grow overflow-y-auto p-3 md:p-8 lg:p-10 custom-scrollbar scroll-smooth">
-          <div className="max-w-[1180px] mx-auto pb-24">
+          <div className="max-w-[1180px] mx-auto pb-32 md:pb-24">
             {activeTab === 'explore' && renderExplore()}
             {activeTab === 'create' && renderCreateStartup()}
             {activeTab === 'my-projects' && renderMyProjects()}
@@ -2697,16 +2697,43 @@ const App = () => {
           </div>
         </section>
 
+        <div className="fixed left-0 right-0 bottom-3 md:bottom-4 z-50 px-3 md:px-8">
+          <nav className="ios-navbar max-w-[1180px] mx-auto rounded-[24px] border border-slate-200/80 bg-white/92 backdrop-blur-xl p-1.5 shadow-xl">
+            <div className="grid grid-cols-5 gap-1">
+              {topNavItems.map((item) => {
+                const isActive = activeTab === item.key || (item.key === 'my-projects' && activeTab === 'details');
+                const lockRequired = item.auth && !currentUser;
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => {
+                      if (lockRequired) return openAuth('login');
+                      navigateTo(item.key);
+                    }}
+                    className={`relative h-[58px] rounded-[18px] flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-all ${isActive ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    <i className={`fa-solid ${item.icon} text-[15px]`}></i>
+                    <span>{item.label}</span>
+                    {item.key === 'inbox' && unreadNotifCount > 0 && (
+                      <span className="absolute top-2 right-3 h-4 min-w-[16px] px-1 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">{unreadNotifCount}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+        </div>
+
         {/* AI MENTOR FAB */}
         <button 
            onClick={() => setShowAIMentor(!showAIMentor)}
-           className={`fixed bottom-6 right-6 md:bottom-8 md:right-8 w-12 h-12 md:w-14 md:h-14 bg-black text-white flex items-center justify-center text-xl rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all z-[110] border-4 border-white ${showAIMentor ? 'rotate-[135deg] bg-rose-600' : ''}`}
+           className={`fixed bottom-24 right-6 md:bottom-8 md:right-8 w-12 h-12 md:w-14 md:h-14 bg-black text-white flex items-center justify-center text-xl rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all z-[110] border-4 border-white ${showAIMentor ? 'rotate-[135deg] bg-rose-600' : ''}`}
         >
            <i className={`fa-solid ${showAIMentor ? 'fa-plus' : 'fa-sparkles'} text-sm md:text-lg`}></i>
         </button>
 
         {showAIMentor && (
-          <div className="fixed bottom-20 right-4 left-4 md:left-auto md:bottom-28 md:right-8 md:w-[400px] h-[500px] md:h-[600px] bg-white border border-gray-100 shadow-2xl rounded-2xl flex flex-col z-[100] animate-in slide-in-from-bottom-8 duration-300 overflow-hidden">
+          <div className="fixed bottom-32 right-4 left-4 md:left-auto md:bottom-28 md:right-8 md:w-[400px] h-[500px] md:h-[600px] bg-white border border-gray-100 shadow-2xl rounded-2xl flex flex-col z-[100] animate-in slide-in-from-bottom-8 duration-300 overflow-hidden">
              <div className="p-4 md:p-5 bg-black flex items-center justify-between text-white shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-sm"><i className="fa-solid fa-microchip"></i></div>
@@ -2861,16 +2888,74 @@ const App = () => {
         </div>
       </Modal>
 
+      <Modal
+        isOpen={isUserProfileModalOpen}
+        onClose={() => { setIsUserProfileModalOpen(false); setViewedUser(null); setViewedUserReputation(null); }}
+        title="Foydalanuvchi profili"
+        size="lg"
+      >
+        {viewedUser ? (
+          <div className="space-y-6">
+            <div className="rounded-2xl overflow-hidden border border-gray-200">
+              <div className="h-40 relative">
+                {viewedUser.banner ? (
+                  <img src={viewedUser.banner} className="absolute inset-0 w-full h-full object-cover" alt="Banner" />
+                ) : (
+                  <div className="absolute inset-0 bg-gradient-to-r from-slate-100 via-blue-50 to-cyan-50" />
+                )}
+              </div>
+              <div className="px-6 pb-6 -mt-10 flex flex-col md:flex-row md:items-end gap-4">
+                <img src={viewedUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(viewedUser.name || 'User')}`} className="w-20 h-20 rounded-2xl border-4 border-white shadow-lg object-cover" alt="Avatar" />
+                <div className="flex-grow">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-xl font-black">{viewedUser.name}</h3>
+                    <Badge variant={viewedUser.is_pro ? 'success' : 'default'}>{viewedUser.is_pro ? 'PRO' : 'Oddiy'}</Badge>
+                  </div>
+                  <p className="text-[12px] text-gray-500 mt-1">{viewedUser.email}</p>
+                  {viewedUser.phone && <p className="text-[12px] text-gray-500">{viewedUser.phone}</p>}
+                </div>
+              </div>
+            </div>
+
+            {viewedUserReputation && (
+              <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+                <p className="text-[11px] uppercase tracking-widest font-bold text-emerald-700">Reputatsiya</p>
+                <p className="text-2xl font-black text-emerald-800 mt-1">{viewedUserReputation.score}/100</p>
+                <p className="text-[12px] text-emerald-700 mt-1">Baholar soni: {viewedUserReputation.stats?.reviews_received || 0} | Vazifa bajarish: {viewedUserReputation.stats?.completion_rate || 0}%</p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <h4 className="text-[11px] uppercase tracking-widest font-bold text-gray-500">Bio</h4>
+              <p className="text-[13px] text-gray-700">{viewedUser.bio || "Foydalanuvchi bio kiritmagan."}</p>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="text-[11px] uppercase tracking-widest font-bold text-gray-500">Ko'nikmalar</h4>
+              <div className="flex flex-wrap gap-2">
+                {Array.isArray(viewedUser.skills) && viewedUser.skills.length > 0 ? (
+                  viewedUser.skills.map((skill, idx) => <Badge key={idx}>{skill}</Badge>)
+                ) : (
+                  <p className="text-[12px] text-gray-500">Ko'nikmalar kiritilmagan.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[13px] text-gray-500">Profil yuklanmoqda...</p>
+        )}
+      </Modal>
+
       <style>{`
         .app-shell {
-          --brand-1: #0f766e;
-          --brand-2: #0e7490;
-          --surface-1: #f8fffc;
-          --surface-2: #eefaf7;
+          --brand-1: #2563eb;
+          --brand-2: #0ea5e9;
+          --surface-1: #f8fafc;
+          --surface-2: #f1f5f9;
           font-family: 'Space Grotesk', 'Manrope', system-ui, -apple-system, sans-serif;
           background:
-            radial-gradient(circle at 8% 8%, rgba(16, 185, 129, 0.16), transparent 42%),
-            radial-gradient(circle at 88% 12%, rgba(14, 116, 144, 0.14), transparent 36%),
+            radial-gradient(circle at 8% 8%, rgba(37, 99, 235, 0.07), transparent 42%),
+            radial-gradient(circle at 88% 12%, rgba(14, 165, 233, 0.06), transparent 36%),
             linear-gradient(180deg, var(--surface-1), var(--surface-2));
         }
 
