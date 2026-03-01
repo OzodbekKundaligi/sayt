@@ -1,6 +1,6 @@
 // services/geminiService.js - AI Mentor service (Groq)
 
-const API_KEY = import.meta.env.VITE_GROQ_API_KEY || "";
+const API_KEY = import.meta.env.VITE_GROQ_API_KEY || "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";
 const MODEL_NAME = import.meta.env.VITE_GROQ_MODEL || "llama-3.1-8b-instant";
 const API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const REQUEST_TIMEOUT_MS = 15000;
