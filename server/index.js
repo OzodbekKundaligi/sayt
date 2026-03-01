@@ -47,12 +47,16 @@ const mapUser = (row) => {
     role: row.role,
     bio: row.bio,
     avatar: row.avatar,
+    banner: row.banner || '',
     portfolio_url: row.portfolio_url,
     skills: parseJson(row.skills),
     languages: parseJson(row.languages),
     tools: parseJson(row.tools),
     created_at: row.created_at,
-    banned: row.banned === 1
+    banned: row.banned === 1,
+    is_pro: row.is_pro === 1,
+    pro_status: row.pro_status || 'free',
+    pro_updated_at: row.pro_updated_at || null
   };
 };
 
@@ -126,6 +130,23 @@ const mapTask = (row) => {
   };
 };
 
+const mapProPaymentRequest = (row) => {
+  if (!row) return null;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    user_name: row.user_name,
+    sender_full_name: row.sender_full_name,
+    sender_card_number: row.sender_card_number,
+    receipt_image: row.receipt_image,
+    status: row.status,
+    admin_note: row.admin_note || '',
+    reviewed_by: row.reviewed_by || null,
+    created_at: row.created_at,
+    reviewed_at: row.reviewed_at || null
+  };
+};
+
 const buildUpdate = (body, jsonFields = []) => {
   const fields = [];
   const values = [];
@@ -143,6 +164,27 @@ const buildUpdate = (body, jsonFields = []) => {
 
 const nowIso = () => new Date().toISOString();
 const makeId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const toBoolInt = (value) => (value ? 1 : 0);
+
+const getPlatformConfig = async () => {
+  const platform = await get('SELECT * FROM platform_settings WHERE id = 1');
+  const billing = await get('SELECT * FROM billing_settings WHERE id = 1');
+  return {
+    pro_enabled: (platform?.pro_enabled ?? 1) === 1,
+    plan_name: platform?.plan_name || 'GarajHub Pro',
+    price_text: platform?.price_text || '149 000 UZS / oy',
+    startup_limit_free: Number(platform?.startup_limit_free ?? 1),
+    card_holder: billing?.card_holder || '',
+    card_number: billing?.card_number || '',
+    bank_name: billing?.bank_name || '',
+    receipt_note: billing?.receipt_note || 'Chek rasmini yuklang'
+  };
+};
+
+const canUseProRestrictions = async () => {
+  const platform = await get('SELECT pro_enabled FROM platform_settings WHERE id = 1');
+  return (platform?.pro_enabled ?? 1) === 1;
+};
 
 const ensureWorkspace = async (startupId, createdBy = 'system') => {
   const existing = await get('SELECT * FROM workspaces WHERE startup_id = ?', [startupId]);
@@ -469,13 +511,216 @@ app.get('/api/stats', async (req, res) => {
   const pending = await get('SELECT COUNT(*) as count FROM startups WHERE status = "pending_admin"');
   const requests = await get('SELECT COUNT(*) as count FROM join_requests WHERE status = "pending"');
   const notifications = await get('SELECT COUNT(*) as count FROM notifications');
+  const proUsers = await get('SELECT COUNT(*) as count FROM users WHERE is_pro = 1');
+  const pendingPro = await get('SELECT COUNT(*) as count FROM pro_payment_requests WHERE status = "pending"');
   res.json({
     users: users?.count || 0,
     startups: startups?.count || 0,
     pending_startups: pending?.count || 0,
     join_requests: requests?.count || 0,
-    notifications: notifications?.count || 0
+    notifications: notifications?.count || 0,
+    pro_users: proUsers?.count || 0,
+    pending_pro_requests: pendingPro?.count || 0
   });
+});
+
+// Pro settings and payment workflow
+app.get('/api/pro/config', async (req, res) => {
+  const config = await getPlatformConfig();
+  res.json(config);
+});
+
+app.put('/api/admin/pro/config', async (req, res) => {
+  const body = req.body || {};
+  const actorId = body.actor_id;
+  const role = body.actor_role;
+  if (role !== 'admin') return res.status(403).send('Only admin can update pro config');
+
+  const now = nowIso();
+  await run(
+    `UPDATE platform_settings
+     SET pro_enabled = ?, plan_name = ?, price_text = ?, startup_limit_free = ?, updated_at = ?
+     WHERE id = 1`,
+    [
+      toBoolInt(body.pro_enabled !== false),
+      body.plan_name || 'GarajHub Pro',
+      body.price_text || '149 000 UZS / oy',
+      Number(body.startup_limit_free || 1),
+      now
+    ]
+  );
+
+  await run(
+    `UPDATE billing_settings
+     SET card_holder = ?, card_number = ?, bank_name = ?, receipt_note = ?, updated_at = ?
+     WHERE id = 1`,
+    [
+      body.card_holder || '',
+      body.card_number || '',
+      body.bank_name || '',
+      body.receipt_note || 'Chek rasmini yuklang',
+      now
+    ]
+  );
+
+  await logAction(actorId, 'update_pro_config', 'platform', 'pro_config', {
+    pro_enabled: body.pro_enabled !== false
+  });
+  const config = await getPlatformConfig();
+  res.json(config);
+});
+
+app.get('/api/pro/requests', async (req, res) => {
+  const status = req.query.status;
+  const userId = req.query.userId;
+  const role = req.query.role;
+  let rows = [];
+  if (role === 'admin') {
+    if (status) {
+      rows = await all('SELECT * FROM pro_payment_requests WHERE status = ? ORDER BY created_at DESC', [status]);
+    } else {
+      rows = await all('SELECT * FROM pro_payment_requests ORDER BY created_at DESC');
+    }
+  } else if (userId) {
+    if (status) {
+      rows = await all(
+        'SELECT * FROM pro_payment_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC',
+        [userId, status]
+      );
+    } else {
+      rows = await all(
+        'SELECT * FROM pro_payment_requests WHERE user_id = ? ORDER BY created_at DESC',
+        [userId]
+      );
+    }
+  } else {
+    return res.status(400).send('userId or role=admin required');
+  }
+  res.json(rows.map(mapProPaymentRequest));
+});
+
+app.post('/api/pro/requests', async (req, res) => {
+  const body = req.body || {};
+  const userId = body.user_id;
+  if (!userId) return res.status(400).send('user_id required');
+  if (!body.sender_full_name || !body.sender_card_number || !body.receipt_image) {
+    return res.status(400).send('sender_full_name, sender_card_number, receipt_image required');
+  }
+
+  const config = await getPlatformConfig();
+  if (!config.pro_enabled) return res.status(400).send('Pro mode is currently disabled');
+
+  const user = await get('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!user) return res.status(404).send('User not found');
+  if (user.is_pro === 1) return res.status(400).send('User already has Pro');
+
+  const pending = await get(
+    'SELECT * FROM pro_payment_requests WHERE user_id = ? AND status = "pending" ORDER BY created_at DESC LIMIT 1',
+    [userId]
+  );
+  if (pending) return res.status(409).send('Pending pro request already exists');
+
+  const id = makeId('proreq');
+  const createdAt = nowIso();
+  await run(
+    `INSERT INTO pro_payment_requests (
+      id, user_id, user_name, sender_full_name, sender_card_number, receipt_image, status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      userId,
+      user.name || body.user_name || '',
+      body.sender_full_name,
+      body.sender_card_number,
+      body.receipt_image,
+      'pending',
+      createdAt
+    ]
+  );
+
+  await run(
+    `INSERT INTO notifications (id, user_id, title, text, type, is_read, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      makeId('n'),
+      'admin',
+      'Yangi Pro so\'rov',
+      `${user.name} Pro uchun chek yubordi. So'rovni tekshiring.`,
+      'info',
+      0,
+      createdAt
+    ]
+  );
+
+  const created = await get('SELECT * FROM pro_payment_requests WHERE id = ?', [id]);
+  res.status(201).json(mapProPaymentRequest(created));
+});
+
+app.put('/api/pro/requests/:id/review', async (req, res) => {
+  const requestId = req.params.id;
+  const body = req.body || {};
+  const action = body.action;
+  const reviewerRole = body.actor_role;
+  if (reviewerRole !== 'admin') return res.status(403).send('Only admin can review');
+  if (!['approve', 'reject'].includes(action)) return res.status(400).send('action must be approve or reject');
+
+  const existing = await get('SELECT * FROM pro_payment_requests WHERE id = ?', [requestId]);
+  if (!existing) return res.status(404).send('Pro request not found');
+  if (existing.status !== 'pending') return res.status(400).send('Request already reviewed');
+
+  const reviewedAt = nowIso();
+  const nextStatus = action === 'approve' ? 'approved' : 'rejected';
+  await run(
+    `UPDATE pro_payment_requests
+     SET status = ?, admin_note = ?, reviewed_by = ?, reviewed_at = ?
+     WHERE id = ?`,
+    [
+      nextStatus,
+      body.admin_note || '',
+      body.actor_id || null,
+      reviewedAt,
+      requestId
+    ]
+  );
+
+  if (action === 'approve') {
+    await run(
+      `UPDATE users
+       SET is_pro = 1, pro_status = 'pro', pro_updated_at = ?
+       WHERE id = ?`,
+      [reviewedAt, existing.user_id]
+    );
+  } else {
+    await run(
+      `UPDATE users
+       SET is_pro = 0, pro_status = 'rejected', pro_updated_at = ?
+       WHERE id = ?`,
+      [reviewedAt, existing.user_id]
+    );
+  }
+
+  await run(
+    `INSERT INTO notifications (id, user_id, title, text, type, is_read, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      makeId('n'),
+      existing.user_id,
+      action === 'approve' ? 'Pro tasdiqlandi' : 'Pro so\'rov rad etildi',
+      action === 'approve'
+        ? 'To\'lovingiz tasdiqlandi. Endi siz Pro funksiyalardan foydalanishingiz mumkin.'
+        : `So'rovingiz rad etildi${body.admin_note ? `: ${body.admin_note}` : '.'}`,
+      action === 'approve' ? 'success' : 'danger',
+      0,
+      reviewedAt
+    ]
+  );
+
+  await logAction(body.actor_id, action === 'approve' ? 'approve_pro_request' : 'reject_pro_request', 'pro_request', requestId, {
+    user_id: existing.user_id
+  });
+
+  const updated = await get('SELECT * FROM pro_payment_requests WHERE id = ?', [requestId]);
+  res.json(mapProPaymentRequest(updated));
 });
 
 // Users
@@ -506,8 +751,11 @@ app.get('/api/users/by-email', async (req, res) => {
 app.post('/api/users', async (req, res) => {
   const u = req.body;
   await run(
-    `INSERT INTO users (id, email, password, name, phone, role, bio, avatar, portfolio_url, skills, languages, tools, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (
+      id, email, password, name, phone, role, bio, avatar, banner, portfolio_url, skills, languages, tools, created_at,
+      is_pro, pro_status, pro_updated_at
+    )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       u.id,
       u.email,
@@ -517,11 +765,15 @@ app.post('/api/users', async (req, res) => {
       u.role || 'user',
       u.bio || '',
       u.avatar || '',
+      u.banner || '',
       u.portfolio_url || '',
       JSON.stringify(u.skills || []),
       JSON.stringify(u.languages || []),
       JSON.stringify(u.tools || []),
-      u.created_at || new Date().toISOString()
+      u.created_at || new Date().toISOString(),
+      u.is_pro ? 1 : 0,
+      u.pro_status || 'free',
+      u.pro_updated_at || null
     ]
   );
   const created = await get('SELECT * FROM users WHERE id = ?', [u.id]);
@@ -554,10 +806,29 @@ app.put('/api/users/:id/ban', async (req, res) => {
   res.json(mapUser(updated));
 });
 
+app.put('/api/users/:id/pro', async (req, res) => {
+  const isPro = req.body?.is_pro ? 1 : 0;
+  await run(
+    `UPDATE users
+     SET is_pro = ?, pro_status = ?, pro_updated_at = ?
+     WHERE id = ?`,
+    [
+      isPro,
+      isPro ? 'pro' : 'free',
+      nowIso(),
+      req.params.id
+    ]
+  );
+  const updated = await get('SELECT * FROM users WHERE id = ?', [req.params.id]);
+  await logAction(req.body?.actor_id, isPro ? 'grant_pro_user' : 'revoke_pro_user', 'user', req.params.id);
+  res.json(mapUser(updated));
+});
+
 app.delete('/api/users/:id', async (req, res) => {
   const userId = req.params.id;
   await run('DELETE FROM join_requests WHERE user_id = ?', [userId]);
   await run('DELETE FROM notifications WHERE user_id = ?', [userId]);
+  await run('DELETE FROM pro_payment_requests WHERE user_id = ?', [userId]);
   const startups = await all('SELECT * FROM startups');
   for (const s of startups) {
     const members = parseJson(s.a_zolar);
@@ -579,6 +850,22 @@ app.get('/api/startups', async (req, res) => {
 
 app.post('/api/startups', async (req, res) => {
   const s = req.body;
+  const proRestrictionsEnabled = await canUseProRestrictions();
+  if (s.egasi_id && proRestrictionsEnabled) {
+    const owner = await get('SELECT * FROM users WHERE id = ?', [s.egasi_id]);
+    const isOwnerPro = owner?.is_pro === 1 || owner?.role === 'admin';
+    if (!isOwnerPro) {
+      const settings = await getPlatformConfig();
+      const ownedCountRow = await get('SELECT COUNT(*) as count FROM startups WHERE egasi_id = ?', [s.egasi_id]);
+      const ownedCount = Number(ownedCountRow?.count || 0);
+      if (ownedCount >= Number(settings.startup_limit_free || 1)) {
+        return res.status(403).json({
+          error: 'Pro plan required',
+          message: `Free user can create only ${settings.startup_limit_free || 1} startup(s). Upgrade to Pro for unlimited startups.`
+        });
+      }
+    }
+  }
   await run(
     `INSERT INTO startups (
       id, nomi, tavsif, category, kerakli_mutaxassislar, logo, egasi_id, egasi_name,

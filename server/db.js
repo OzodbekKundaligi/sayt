@@ -51,6 +51,7 @@ const init = async () => {
       role TEXT DEFAULT 'user',
       bio TEXT,
       avatar TEXT,
+      banner TEXT,
       portfolio_url TEXT,
       skills TEXT,
       languages TEXT,
@@ -144,6 +145,45 @@ const init = async () => {
       entity_id TEXT,
       meta TEXT,
       created_at TEXT
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      pro_enabled INTEGER DEFAULT 1,
+      plan_name TEXT DEFAULT 'GarajHub Pro',
+      price_text TEXT DEFAULT '149 000 UZS / oy',
+      startup_limit_free INTEGER DEFAULT 1,
+      updated_at TEXT
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS billing_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      card_holder TEXT DEFAULT '',
+      card_number TEXT DEFAULT '',
+      bank_name TEXT DEFAULT '',
+      receipt_note TEXT DEFAULT 'Chek rasmini yuklang',
+      updated_at TEXT
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS pro_payment_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      sender_full_name TEXT NOT NULL,
+      sender_card_number TEXT NOT NULL,
+      receipt_image TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      admin_note TEXT,
+      reviewed_by TEXT,
+      created_at TEXT,
+      reviewed_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
 
@@ -300,10 +340,28 @@ const init = async () => {
   `);
 
   await ensureColumn('users', 'banned', 'INTEGER DEFAULT 0');
+  await ensureColumn('users', 'is_pro', 'INTEGER DEFAULT 0');
+  await ensureColumn('users', 'pro_status', `TEXT DEFAULT 'free'`);
+  await ensureColumn('users', 'pro_updated_at', 'TEXT');
+  await ensureColumn('users', 'banner', 'TEXT');
   await ensureColumn('startups', 'segment', `TEXT DEFAULT 'IT Founder + Developer'`);
   await ensureColumn('startups', 'lifecycle_status', `TEXT DEFAULT 'live'`);
   await ensureColumn('startups', 'success_fee_percent', 'REAL DEFAULT 1.5');
   await ensureColumn('startups', 'registry_notes', 'TEXT');
+
+  await run(
+    `INSERT OR IGNORE INTO platform_settings (id, pro_enabled, plan_name, price_text, startup_limit_free, updated_at)
+     VALUES (1, 1, 'GarajHub Pro', '149 000 UZS / oy', 1, ?)
+    `,
+    [new Date().toISOString()]
+  );
+
+  await run(
+    `INSERT OR IGNORE INTO billing_settings (id, card_holder, card_number, bank_name, receipt_note, updated_at)
+     VALUES (1, '', '', '', 'Chek rasmini yuklang', ?)
+    `,
+    [new Date().toISOString()]
+  );
 
   const existingCategories = await all('SELECT * FROM categories');
   if (existingCategories.length === 0) {

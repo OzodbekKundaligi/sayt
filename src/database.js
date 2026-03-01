@@ -68,6 +68,13 @@ export const dbOperations = {
     });
   },
 
+  async setUserPro(userId, isPro, actorId) {
+    return request(`/users/${userId}/pro`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_pro: isPro, actor_id: actorId })
+    });
+  },
+
   async deleteUser(userId, actorId) {
     const query = actorId ? `?actor_id=${encodeURIComponent(actorId)}` : '';
     return request(`/users/${userId}${query}`, { method: 'DELETE' });
@@ -335,6 +342,40 @@ export const dbOperations = {
   // AI risk
   async getStartupAiRisk(startupId) {
     return request(`/startups/${startupId}/ai-risk`);
+  },
+
+  // Pro config and payment requests
+  async getProConfig() {
+    return request('/pro/config');
+  },
+
+  async updateProConfig(payload) {
+    return request('/admin/pro/config', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async getProRequests({ status = '', userId = '', role = '' } = {}) {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (userId) params.set('userId', userId);
+    if (role) params.set('role', role);
+    return request(`/pro/requests${params.toString() ? `?${params.toString()}` : ''}`);
+  },
+
+  async submitProRequest(payload) {
+    return request('/pro/requests', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async reviewProRequest(requestId, payload) {
+    return request(`/pro/requests/${requestId}/review`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
   }
 };
 

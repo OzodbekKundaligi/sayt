@@ -167,6 +167,33 @@ const App = () => {
   const [adminTab, setAdminTab] = useState('moderation');
   const [adminStats, setAdminStats] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [proConfig, setProConfig] = useState({
+    pro_enabled: true,
+    plan_name: 'GarajHub Pro',
+    price_text: '149 000 UZS / oy',
+    startup_limit_free: 1,
+    card_holder: '',
+    card_number: '',
+    bank_name: '',
+    receipt_note: 'Chek rasmini yuklang'
+  });
+  const [adminProConfigDraft, setAdminProConfigDraft] = useState({
+    pro_enabled: true,
+    plan_name: 'GarajHub Pro',
+    price_text: '149 000 UZS / oy',
+    startup_limit_free: 1,
+    card_holder: '',
+    card_number: '',
+    bank_name: '',
+    receipt_note: 'Chek rasmini yuklang'
+  });
+  const [proRequests, setProRequests] = useState([]);
+  const [showProModal, setShowProModal] = useState(false);
+  const [proReceiptBase64, setProReceiptBase64] = useState('');
+  const [proRequestDraft, setProRequestDraft] = useState({
+    sender_full_name: '',
+    sender_card_number: ''
+  });
   const [reviewDraft, setReviewDraft] = useState({
     to_user_id: '',
     rating: 5,
@@ -202,6 +229,7 @@ const App = () => {
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [editedUser, setEditedUser] = useState({});
   const [tempFileBase64, setTempFileBase64] = useState(null);
+  const [tempBannerBase64, setTempBannerBase64] = useState(null);
 
   const chatEndRef = useRef(null);
 
@@ -223,10 +251,11 @@ const App = () => {
       await initDatabase();
       
       // Load data from SQLite
-      const [usersData, startupsData, requestsData] = await Promise.all([
+      const [usersData, startupsData, requestsData, proCfg] = await Promise.all([
         dbOperations.getUsers(),
         dbOperations.getStartups(),
-        dbOperations.getJoinRequests()
+        dbOperations.getJoinRequests(),
+        dbOperations.getProConfig().catch(() => null)
       ]);
 
       try {
@@ -241,15 +270,44 @@ const App = () => {
       setAllUsers(usersData);
       setStartups(startupsData);
       setJoinRequests(requestsData);
+      if (proCfg) {
+        setProConfig(proCfg);
+        setAdminProConfigDraft(proCfg);
+      }
       
       // Load current user from localStorage
       const savedUserId = localStorage.getItem('currentUserId');
       if (savedUserId) {
-        const user = await dbOperations.getUserById(savedUserId);
-        if (user) {
-          setCurrentUser(user);
-          const userNotifs = await dbOperations.getNotifications(user.id);
-          setNotifications(userNotifs);
+        if (savedUserId === 'admin') {
+          const admin = {
+            id: 'admin',
+            email: ADMIN_EMAIL,
+            name: 'Ozodbek Mamatov',
+            phone: '+998932303410',
+            role: 'admin',
+            created_at: new Date().toISOString(),
+            skills: [],
+            languages: [],
+            tools: [],
+            avatar: `https://ui-avatars.com/api/?name=Ozodbek+Mamatov&background=111&color=fff`,
+            banner: '',
+            is_pro: true,
+            pro_status: 'pro'
+          };
+          setCurrentUser(admin);
+          const userNotifs = await dbOperations.getNotifications('admin').catch(() => []);
+          setNotifications(Array.isArray(userNotifs) ? userNotifs : []);
+          const pending = await dbOperations.getProRequests({ role: 'admin', status: 'pending' }).catch(() => []);
+          setProRequests(Array.isArray(pending) ? pending : []);
+        } else {
+          const user = await dbOperations.getUserById(savedUserId);
+          if (user) {
+            setCurrentUser(user);
+            const userNotifs = await dbOperations.getNotifications(user.id);
+            setNotifications(userNotifs);
+            const myProRequests = await dbOperations.getProRequests({ userId: user.id }).catch(() => []);
+            setProRequests(Array.isArray(myProRequests) ? myProRequests : []);
+          }
         }
       }
       if (!savedUserId) {
@@ -323,6 +381,61 @@ const App = () => {
     loadProfileReputation();
   }, [currentUser, startups]);
 
+  useEffect(() => {
+    const loadProSideData = async () => {
+      const cfg = await dbOperations.getProConfig().catch(() => null);
+      if (cfg) {
+        setProConfig(cfg);
+        if (currentUser?.role === 'admin') setAdminProConfigDraft(cfg);
+      }
+      if (!currentUser) {
+        setProRequests([]);
+        return;
+      }
+      if (currentUser.role === 'admin') {
+        const pending = await dbOperations.getProRequests({ role: 'admin', status: 'pending' }).catch(() => []);
+        setProRequests(Array.isArray(pending) ? pending : []);
+      } else {
+        const mine = await dbOperations.getProRequests({ userId: currentUser.id }).catch(() => []);
+        setProRequests(Array.isArray(mine) ? mine : []);
+      }
+    };
+    loadProSideData();
+  }, [currentUser]);
+
+  useEffect(() => {
+    const syncCurrentUser = async () => {
+      if (!currentUser || currentUser.id === 'admin') return;
+      const fresh = await dbOperations.getUserById(currentUser.id).catch(() => null);
+      if (!fresh) return;
+      setCurrentUser(fresh);
+      setAllUsers((prev) => prev.map((u) => (u.id === fresh.id ? fresh : u)));
+    };
+    syncCurrentUser();
+  }, [notifications.length]);
+
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    const refreshLoop = async () => {
+      const userNotifs = await dbOperations.getNotifications(currentUser.id).catch(() => []);
+      if (Array.isArray(userNotifs)) setNotifications(userNotifs);
+
+      if (currentUser.id !== 'admin') {
+        const freshUser = await dbOperations.getUserById(currentUser.id).catch(() => null);
+        if (freshUser) {
+          setCurrentUser(freshUser);
+          setAllUsers((prev) => prev.map((u) => (u.id === freshUser.id ? freshUser : u)));
+        }
+      } else {
+        const pending = await dbOperations.getProRequests({ role: 'admin', status: 'pending' }).catch(() => []);
+        if (Array.isArray(pending)) setProRequests(pending);
+      }
+    };
+    refreshLoop();
+    const interval = setInterval(refreshLoop, 20000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, currentUser?.role]);
+
   // --- HANDLERS ---
 
   const addNotification = async (userId, title, text, type = 'info') => {
@@ -345,13 +458,20 @@ const App = () => {
 
   const refreshAdminData = async () => {
     try {
-      const [stats, logs, cats] = await Promise.all([
+      const [stats, logs, cats, cfg, pendingProRequests] = await Promise.all([
         dbOperations.getStats(),
         dbOperations.getAuditLogs(80),
-        dbOperations.getCategories()
+        dbOperations.getCategories(),
+        dbOperations.getProConfig().catch(() => null),
+        dbOperations.getProRequests({ role: 'admin', status: 'pending' }).catch(() => [])
       ]);
       setAdminStats(stats);
       setAuditLogs(logs || []);
+      if (cfg) {
+        setProConfig(cfg);
+        setAdminProConfigDraft(cfg);
+      }
+      setProRequests(Array.isArray(pendingProRequests) ? pendingProRequests : []);
       if (Array.isArray(cats) && cats.length > 0) {
         setCategories(cats.map(c => c.name));
       }
@@ -378,7 +498,10 @@ const App = () => {
           skills: [], 
           languages: [], 
           tools: [],
-          avatar: `https://ui-avatars.com/api/?name=Ozodbek+Mamatov&background=111&color=fff`
+          avatar: `https://ui-avatars.com/api/?name=Ozodbek+Mamatov&background=111&color=fff`,
+          banner: '',
+          is_pro: true,
+          pro_status: 'pro'
         };
         setCurrentUser(admin);
         localStorage.setItem('currentUserId', 'admin');
@@ -418,7 +541,10 @@ const App = () => {
         skills: [], 
         languages: [], 
         tools: [],
-        avatar: tempFileBase64 || `https://ui-avatars.com/api/?name=${encodeURIComponent(fd.get('name'))}&background=111&color=fff`
+        avatar: tempFileBase64 || `https://ui-avatars.com/api/?name=${encodeURIComponent(fd.get('name'))}&background=111&color=fff`,
+        banner: '',
+        is_pro: false,
+        pro_status: 'free'
       };
       
       await dbOperations.createUser(u);
@@ -440,6 +566,25 @@ const App = () => {
       setTempFileBase64(base64);
       if (isEditProfileModalOpen) setEditedUser(prev => ({ ...prev, avatar: base64 }));
     }
+  };
+
+  const handleBannerChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validation = validateImageFile(file);
+    if (!validation.valid) return alert(validation.error);
+    const base64 = await convertToBase64(file);
+    setTempBannerBase64(base64);
+    setEditedUser((prev) => ({ ...prev, banner: base64 }));
+  };
+
+  const handleProReceiptChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validation = validateImageFile(file);
+    if (!validation.valid) return alert(validation.error);
+    const base64 = await convertToBase64(file);
+    setProReceiptBase64(base64);
   };
 
   const navigateTo = (tab, id = null) => {
@@ -573,6 +718,75 @@ const App = () => {
     }
   };
 
+  const handleAdminUserPro = async (userId, isPro) => {
+    try {
+      const updated = await dbOperations.setUserPro(userId, isPro, currentUser?.id);
+      setAllUsers(prev => prev.map(u => u.id === userId ? updated : u));
+      await refreshAdminData();
+    } catch (e) {
+      alert('Pro holatini o\'zgartirishda xatolik');
+    }
+  };
+
+  const handleSaveProConfig = async () => {
+    try {
+      const updated = await dbOperations.updateProConfig({
+        ...adminProConfigDraft,
+        actor_id: currentUser?.id,
+        actor_role: currentUser?.role
+      });
+      setProConfig(updated);
+      setAdminProConfigDraft(updated);
+      await refreshAdminData();
+      alert('Pro sozlamalari saqlandi.');
+    } catch (e) {
+      alert('Pro sozlamalarini saqlashda xatolik.');
+    }
+  };
+
+  const handleSubmitProRequest = async () => {
+    if (!currentUser) return openAuth('login');
+    if (!proRequestDraft.sender_full_name.trim() || !proRequestDraft.sender_card_number.trim()) {
+      return alert('Karta egasi va karta raqamini kiriting.');
+    }
+    if (!proReceiptBase64) return alert('Chek rasmini yuklang.');
+    try {
+      const created = await dbOperations.submitProRequest({
+        user_id: currentUser.id,
+        user_name: currentUser.name,
+        sender_full_name: proRequestDraft.sender_full_name,
+        sender_card_number: proRequestDraft.sender_card_number,
+        receipt_image: proReceiptBase64
+      });
+      setProRequests((prev) => [created, ...prev]);
+      setShowProModal(false);
+      setProReceiptBase64('');
+      setProRequestDraft({ sender_full_name: '', sender_card_number: '' });
+      alert('Pro so\'rov yuborildi. Admin tasdiqlashini kuting.');
+    } catch (e) {
+      alert(e?.message || 'Pro so\'rov yuborishda xatolik.');
+    }
+  };
+
+  const handleReviewProRequest = async (requestId, action) => {
+    if (currentUser?.role !== 'admin') return;
+    const note = action === 'reject' ? prompt('Rad etish sababi (ixtiyoriy):') : '';
+    try {
+      await dbOperations.reviewProRequest(requestId, {
+        action,
+        admin_note: note || '',
+        actor_id: currentUser.id,
+        actor_role: currentUser.role
+      });
+      await Promise.all([
+        refreshAdminData(),
+        dbOperations.getUsers().then(setAllUsers)
+      ]);
+    } catch (e) {
+      alert('Pro so\'rovni ko\'rib chiqishda xatolik.');
+    }
+  };
+
   const handleAdminStartupStatus = async (startupId, status) => {
     const reason = status === 'rejected' ? prompt('Rad etish sababi:') : null;
     if (status === 'rejected' && !reason) return;
@@ -640,6 +854,10 @@ const App = () => {
   const handleCreateStartup = async (e) => {
     e.preventDefault();
     if (!currentUser) return;
+    if (!canCreateStartup) {
+      setShowProModal(true);
+      return alert(`Free rejimda faqat ${freeStartupLimit} ta startup yaratish mumkin.`);
+    }
     const fd = new FormData(e.currentTarget);
     const s = {
       id: `s_${Date.now()}`,
@@ -663,8 +881,16 @@ const App = () => {
       registry_notes: ''
     };
     
-    await dbOperations.createStartup(s);
-    setStartups(prev => [s, ...prev]);
+    try {
+      await dbOperations.createStartup(s);
+      setStartups(prev => [s, ...prev]);
+    } catch (error) {
+      const message = String(error?.message || '');
+      if (message.toLowerCase().includes('pro')) {
+        setShowProModal(true);
+      }
+      return alert(message || 'Startup yaratishda xatolik.');
+    }
     
     navigateTo('my-projects');
     await addNotification('admin', 'Yangi ariza', `"${s.nomi}" loyihasi moderatsiya uchun yuborildi.`, 'info');
@@ -676,14 +902,15 @@ const App = () => {
     if (!currentUser) return;
     const updatedUser = { ...currentUser, ...editedUser };
     
-    await dbOperations.updateUser(currentUser.id, updatedUser);
+    const savedUser = await dbOperations.updateUser(currentUser.id, updatedUser);
     
-    setAllUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
-    setCurrentUser(updatedUser);
+    setAllUsers(prev => prev.map(u => u.id === currentUser.id ? savedUser : u));
+    setCurrentUser(savedUser);
     
     setIsEditProfileModalOpen(false);
     setEditedUser({});
     setTempFileBase64(null);
+    setTempBannerBase64(null);
     alert('Profil muvaffaqiyatli yangilandi!');
   };
 
@@ -818,6 +1045,7 @@ const App = () => {
 
   const handleLogout = () => {
     setCurrentUser(null);
+    setProRequests([]);
     localStorage.removeItem('currentUserId');
     navigateTo('explore');
     alert('Tizimdan muvaffaqiyatli chiqdingiz!');
@@ -1070,6 +1298,37 @@ const App = () => {
   const equityTotal = workspaceEquity
     .filter((e) => e.status !== 'archived')
     .reduce((acc, e) => acc + Number(e.share_percent || 0), 0);
+  const ownedStartupsCount = currentUser ? startups.filter((s) => s.egasi_id === currentUser.id).length : 0;
+  const proEnabled = proConfig?.pro_enabled !== false;
+  const isProUser = !!currentUser?.is_pro || currentUser?.role === 'admin';
+  const hasProAccess = !proEnabled || isProUser;
+  const freeStartupLimit = Number(proConfig?.startup_limit_free || 1);
+  const canCreateStartup = !currentUser || !proEnabled || isProUser || ownedStartupsCount < freeStartupLimit;
+
+  const renderProLocked = (title = 'Bu bo\'lim Pro uchun') => (
+    <div className="max-w-xl mx-auto mt-6">
+      <div className="bg-white/80 backdrop-blur border border-slate-200 rounded-3xl p-8 shadow-xl text-center space-y-4">
+        <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
+          <i className="fa-solid fa-crown text-xl"></i>
+        </div>
+        <h3 className="text-lg font-black tracking-tight">{title}</h3>
+        <p className="text-[13px] text-gray-500">
+          {proConfig?.plan_name || 'GarajHub Pro'} bilan ushbu bo'limlar ochiladi. To'lovni yuborib upgrade qiling.
+        </p>
+        <div className="flex justify-center">
+          <Button onClick={() => setShowProModal(true)} className="px-7">Pro ga o'tish</Button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const topNavItems = [
+    { key: 'explore', label: 'Kashf', icon: 'fa-compass' },
+    { key: 'my-projects', label: 'Loyiha', icon: 'fa-layer-group', auth: true },
+    { key: 'create', label: 'Yarat', icon: 'fa-plus' },
+    { key: 'inbox', label: 'Inbox', icon: 'fa-bell', auth: true },
+    { key: 'profile', label: 'Profil', icon: 'fa-user', auth: true }
+  ];
 
   // --- RENDERERS ---
 
@@ -1218,6 +1477,29 @@ const App = () => {
   const renderCreateStartup = () => {
     if (!currentUser) {
       return <EmptyState icon="fa-lock" title="Kirish talab qilinadi" subtitle="Startup yaratish uchun tizimga kiring" action={<Button onClick={() => openAuth('login')}>Kirish</Button>} />;
+    }
+    if (!canCreateStartup) {
+      return (
+        <div className="max-w-[620px] mx-auto">
+          <div className="bg-white border border-amber-200 rounded-3xl p-8 md:p-10 shadow-xl space-y-5">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
+              <i className="fa-solid fa-crown text-xl"></i>
+            </div>
+            <h2 className="text-2xl font-black tracking-tight">Free limit tugadi</h2>
+            <p className="text-[14px] text-gray-600">
+              Free rejimda maksimal {freeStartupLimit} ta startup yaratish mumkin. Pro bo'lsangiz cheksiz startup yarata olasiz.
+            </p>
+            <div className="bg-slate-900 text-white rounded-2xl p-5">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-300 font-bold">{proConfig.plan_name}</p>
+              <p className="text-2xl font-black mt-2">{proConfig.price_text}</p>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={() => navigateTo('my-projects')} className="flex-1">Orqaga</Button>
+              <Button onClick={() => setShowProModal(true)} icon="fa-credit-card" className="flex-1">Pro olish</Button>
+            </div>
+          </div>
+        </div>
+      );
     }
 
     return (
@@ -1429,6 +1711,7 @@ const App = () => {
           )}
 
           {activeDetailTab === 'reputatsiya' && (
+            hasProAccess ? (
             <div className="space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 {workspaceReputation.members.map((m) => (
@@ -1538,9 +1821,11 @@ const App = () => {
                 {workspaceReviews.length === 0 && <p className="text-[12px] text-gray-500">Hali review yo'q.</p>}
               </div>
             </div>
+            ) : renderProLocked("Reputatsiya grafigi Pro uchun")
           )}
 
           {activeDetailTab === 'governance' && (
+            hasProAccess ? (
             <div className="space-y-8">
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
@@ -1638,9 +1923,11 @@ const App = () => {
                 </div>
               </div>
             </div>
+            ) : renderProLocked("Governance paneli Pro uchun")
           )}
 
           {activeDetailTab === 'kapital' && (
+            hasProAccess ? (
             <div className="space-y-8">
               <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
                 <div className="flex items-center justify-between">
@@ -1687,9 +1974,11 @@ const App = () => {
                 {workspaceEquity.length === 0 && <p className="text-[12px] text-gray-500">Equity hali kiritilmagan.</p>}
               </div>
             </div>
+            ) : renderProLocked("Equity ledger Pro uchun")
           )}
 
           {activeDetailTab === 'registry' && (
+            hasProAccess ? (
             <div className="space-y-8">
               <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
                 <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Startup Registry</h3>
@@ -1784,9 +2073,11 @@ const App = () => {
                 </div>
               </div>
             </div>
+            ) : renderProLocked("Startup registry Pro uchun")
           )}
 
           {activeDetailTab === 'airadar' && (
+            hasProAccess ? (
             <div className="space-y-8">
               {workspaceAiRisk ? (
                 <>
@@ -1834,6 +2125,7 @@ const App = () => {
                 <EmptyState icon="fa-brain" title="AI risk hisoblanmadi" subtitle="Workspace ma'lumotlarini to'ldiring va qayta urinib ko'ring." />
               )}
             </div>
+            ) : renderProLocked("AI Radar Pro uchun")
           )}
 
           {activeDetailTab === 'jamoa' && (
@@ -1878,26 +2170,51 @@ const App = () => {
     }
 
     return (
-      <div className="max-w-[800px] mx-auto space-y-10 md:space-y-12 animate-in fade-in">
-        <div className="bg-white border border-gray-100 rounded-2xl p-6 md:p-10 relative overflow-hidden shadow-sm group">
-          <div className="absolute top-0 left-0 w-full h-24 md:h-24 bg-gray-50 border-b border-gray-100"></div>
-          <div className="relative z-10 flex flex-col items-center text-center">
-            <div className="relative group/avatar mb-4 md:mb-6">
-              <img src={currentUser.avatar} className="w-24 h-24 md:w-32 md:h-32 rounded-full border-4 border-white shadow-xl grayscale hover:grayscale-0 transition-all object-cover" alt="Profile" />
-              <button onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }} className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center text-white opacity-0 group-hover/avatar:opacity-100 transition-all"><i className="fa-solid fa-camera"></i></button>
+      <div className="max-w-[860px] mx-auto space-y-10 md:space-y-12 animate-in fade-in">
+        <div className="bg-white/90 backdrop-blur border border-gray-200 rounded-3xl overflow-hidden shadow-xl group">
+          <div className="relative h-[170px] md:h-[220px]">
+            {currentUser.banner ? (
+              <img src={currentUser.banner} className="absolute inset-0 w-full h-full object-cover" alt="Profile banner" />
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-500" />
+            )}
+            <div className="absolute inset-0 bg-black/15" />
+            <button
+              onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }}
+              className="absolute top-4 right-4 bg-white/80 border border-white rounded-full h-9 w-9 flex items-center justify-center text-gray-700 hover:bg-white transition"
+              title="Banner tahrirlash"
+            >
+              <i className="fa-solid fa-camera"></i>
+            </button>
+          </div>
+
+          <div className="px-6 md:px-10 pb-7 md:pb-9 -mt-12 md:-mt-14">
+            <div className="flex flex-col md:flex-row md:items-end gap-5">
+              <div className="relative group/avatar">
+                <img src={currentUser.avatar} className="w-24 h-24 md:w-28 md:h-28 rounded-2xl border-4 border-white shadow-xl object-cover" alt="Profile" />
+                <button onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }} className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center text-white opacity-0 group-hover/avatar:opacity-100 transition-all"><i className="fa-solid fa-camera"></i></button>
+              </div>
+              <div className="flex-grow">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-2xl md:text-3xl font-black tracking-tight">{currentUser.name}</h2>
+                  <Badge variant={currentUser.is_pro ? 'success' : 'default'}>{currentUser.is_pro ? 'PRO' : 'FREE'}</Badge>
+                </div>
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <Badge variant="active" className="truncate max-w-[220px]">{currentUser.email}</Badge>
+                  {currentUser.phone && currentUser.phone !== '000' && <Badge>{currentUser.phone}</Badge>}
+                </div>
+              </div>
+              <div className="flex gap-2 md:justify-end">
+                {!currentUser.is_pro && proEnabled && (
+                  <Button onClick={() => setShowProModal(true)} className="h-10" icon="fa-crown">Pro</Button>
+                )}
+                <Button onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }} variant="secondary" size="md" className="h-10">Tahrirlash</Button>
+                {currentUser.portfolio_url && <Button variant="ghost" icon="fa-link" onClick={() => window.open(currentUser.portfolio_url, '_blank')} className="h-10 border border-gray-100" />}
+              </div>
             </div>
-            <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight italic mb-2 px-2">{currentUser.name}</h2>
-            <div className="flex gap-2 mb-4 justify-center flex-wrap px-4">
-              <Badge variant="active" className="truncate max-w-[200px]">{currentUser.email}</Badge>
-              {currentUser.phone && currentUser.phone !== '000' && <Badge>{currentUser.phone}</Badge>}
-            </div>
-            <p className="text-[13px] md:text-[14px] text-gray-500 max-w-md italic mb-6 md:mb-8 px-6">
+            <p className="text-[13px] md:text-[14px] text-gray-500 mt-4">
               {currentUser.bio || "O'zingiz haqingizda bir necha so'z yozing."}
             </p>
-            <div className="flex gap-3 md:gap-4 flex-wrap justify-center w-full max-w-[400px]">
-              <Button onClick={() => { setEditedUser(currentUser); setIsEditProfileModalOpen(true); }} variant="secondary" size="md" className="flex-1 h-12 md:h-10">Tahrirlash</Button>
-              {currentUser.portfolio_url && <Button variant="ghost" icon="fa-link" onClick={() => window.open(currentUser.portfolio_url, '_blank')} className="flex-1 h-12 md:h-10 border border-gray-100" />}
-            </div>
           </div>
         </div>
 
@@ -1939,6 +2256,17 @@ const App = () => {
           </div>
         )}
 
+        {!currentUser.is_pro && proEnabled && (
+          <div className="bg-white border border-amber-200 rounded-2xl p-6 md:p-7 flex flex-col md:flex-row md:items-center justify-between gap-5">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-amber-600 font-bold">{proConfig.plan_name}</p>
+              <h3 className="text-xl font-black mt-1">{proConfig.price_text}</h3>
+              <p className="text-[13px] text-gray-500 mt-2">Free rejim: {freeStartupLimit} ta startup. Pro bilan cheksiz va premium bo'limlar ochiladi.</p>
+            </div>
+            <Button onClick={() => setShowProModal(true)} icon="fa-credit-card" className="h-11 px-7">To'lov yuborish</Button>
+          </div>
+        )}
+
         <div className="space-y-4 md:space-y-6 px-2">
           <h3 className="text-[11px] md:text-[12px] font-bold uppercase tracking-widest text-black/30 border-b border-gray-100 pb-2">Ko'nikmalar</h3>
           <div className="flex flex-wrap gap-2">
@@ -1961,13 +2289,16 @@ const App = () => {
       startups: startups.length,
       pending_startups: startups.filter(s => s.status === 'pending_admin').length,
       join_requests: joinRequests.length,
-      notifications: notifications.length
+      notifications: notifications.length,
+      pro_users: allUsers.filter((u) => u.is_pro).length,
+      pending_pro_requests: proRequests.filter((r) => r.status === 'pending').length
     };
 
     const adminTabs = [
       { key: 'moderation', label: 'Moderatsiya' },
       { key: 'users', label: 'Foydalanuvchilar' },
       { key: 'startups', label: 'Startuplar' },
+      { key: 'pro', label: 'Pro' },
       { key: 'categories', label: 'Kategoriya' },
       { key: 'stats', label: 'Statistika' },
       { key: 'audit', label: 'Audit' }
@@ -2032,6 +2363,7 @@ const App = () => {
                   <div className="flex gap-2 mt-2">
                     <Badge variant={u.role === 'admin' ? 'active' : 'default'}>{u.role}</Badge>
                     {u.banned && <Badge variant="danger">Banned</Badge>}
+                    {u.is_pro && <Badge variant="success">PRO</Badge>}
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
@@ -2049,6 +2381,13 @@ const App = () => {
                     onClick={() => handleAdminUserBan(u.id, !u.banned)}
                   >
                     {u.banned ? 'Unban' : 'Ban'}
+                  </Button>
+                  <Button
+                    variant={u.is_pro ? 'secondary' : 'primary'}
+                    className="h-10 px-5"
+                    onClick={() => handleAdminUserPro(u.id, !u.is_pro)}
+                  >
+                    {u.is_pro ? 'Pro Off' : 'Pro On'}
                   </Button>
                   <Button variant="ghost" className="h-10 px-5 border border-gray-100" onClick={() => handleAdminUserDelete(u.id)}>Delete</Button>
                 </div>
@@ -2082,6 +2421,61 @@ const App = () => {
           </div>
         )}
 
+        {adminTab === 'pro' && (
+          <div className="space-y-6">
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 md:p-8 space-y-5">
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Pro konfiguratsiya</h3>
+                <Badge variant={adminProConfigDraft.pro_enabled ? 'success' : 'danger'}>{adminProConfigDraft.pro_enabled ? 'ENABLED' : 'DISABLED'}</Badge>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input label="Plan nomi" value={adminProConfigDraft.plan_name} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, plan_name: e.target.value }))} />
+                <Input label="Narx matni" value={adminProConfigDraft.price_text} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, price_text: e.target.value }))} />
+                <Input label="Free startup limiti" type="number" value={adminProConfigDraft.startup_limit_free} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, startup_limit_free: Number(e.target.value || 1) }))} />
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-widest ml-1">Pro rejim</label>
+                  <select className="w-full h-[44px] border border-gray-200 rounded-lg px-4 text-[14px]" value={adminProConfigDraft.pro_enabled ? 'on' : 'off'} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, pro_enabled: e.target.value === 'on' }))}>
+                    <option value="on">Yoqilgan</option>
+                    <option value="off">O'chirilgan</option>
+                  </select>
+                </div>
+                <Input label="Karta egasi (ism familya)" value={adminProConfigDraft.card_holder} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, card_holder: e.target.value }))} />
+                <Input label="Karta raqami" value={adminProConfigDraft.card_number} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, card_number: e.target.value }))} />
+                <Input label="Bank nomi" value={adminProConfigDraft.bank_name} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, bank_name: e.target.value }))} />
+                <Input label="Chek upload matni" value={adminProConfigDraft.receipt_note} onChange={(e) => setAdminProConfigDraft((p) => ({ ...p, receipt_note: e.target.value }))} />
+              </div>
+              <Button onClick={handleSaveProConfig} className="h-11 px-7">Saqlash</Button>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 md:p-8 space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="text-[13px] font-black uppercase tracking-widest text-gray-600">Pending Pro to'lovlar</h3>
+                <Badge variant="danger">{proRequests.filter((r) => r.status === 'pending').length}</Badge>
+              </div>
+              {proRequests.filter((r) => r.status === 'pending').map((r) => (
+                <div key={r.id} className="border border-gray-200 rounded-2xl p-4 md:p-5 space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div>
+                      <p className="text-[14px] font-bold">{r.user_name} ({r.user_id})</p>
+                      <p className="text-[12px] text-gray-500">Karta egasi: {r.sender_full_name} | Karta: {r.sender_card_number}</p>
+                      <p className="text-[11px] text-gray-400">{new Date(r.created_at).toLocaleString()}</p>
+                    </div>
+                    <Badge>{r.status}</Badge>
+                  </div>
+                  <div className="rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
+                    <img src={r.receipt_image} alt="Chek rasmi" className="w-full max-h-[260px] object-contain" />
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <Button className="flex-1 h-10" onClick={() => handleReviewProRequest(r.id, 'approve')}>Tasdiqlash</Button>
+                    <Button variant="danger" className="flex-1 h-10" onClick={() => handleReviewProRequest(r.id, 'reject')}>Rad etish</Button>
+                  </div>
+                </div>
+              ))}
+              {proRequests.filter((r) => r.status === 'pending').length === 0 && <EmptyState icon="fa-receipt" title="Pending cheklar yo'q" />}
+            </div>
+          </div>
+        )}
+
         {adminTab === 'categories' && (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
@@ -2098,13 +2492,15 @@ const App = () => {
         )}
 
         {adminTab === 'stats' && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 md:gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-4 md:gap-6">
             {[
               { val: stats.users, label: 'Users' },
               { val: stats.startups, label: 'Startups' },
               { val: stats.pending_startups, label: 'Pending' },
               { val: stats.join_requests, label: 'Requests' },
-              { val: stats.notifications, label: 'Notifications' }
+              { val: stats.notifications, label: 'Notifications' },
+              { val: stats.pro_users || 0, label: 'Pro Users' },
+              { val: stats.pending_pro_requests || 0, label: 'Pro Pending' }
             ].map((s, i) => (
               <div key={i} className="bg-white border border-gray-100 rounded-xl p-4 md:p-6 text-center shadow-sm hover:border-black transition-all">
                 <p className="text-xl md:text-3xl font-extrabold italic mb-1">{s.val}</p>
@@ -2229,39 +2625,67 @@ const App = () => {
 
   return (
     <div className="app-shell flex h-screen text-gray-900 selection:bg-emerald-700 selection:text-white overflow-hidden">
-      {renderSidebar()}
-
       <main className="flex-grow flex flex-col overflow-hidden relative">
-        <header className="h-16 border-b border-gray-100 bg-white/80 backdrop-blur-md flex items-center justify-between px-4 md:px-8 sticky top-0 z-40">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setIsMobileMenuOpen(true)} className="lg:hidden text-gray-900 p-2 -ml-2"><i className="fa-solid fa-bars-staggered"></i></button>
-            <p className="text-[9px] md:text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] md:tracking-[0.4em] italic select-none truncate">GarajHub / <span className="text-black font-extrabold">{activeTab}</span></p>
-          </div>
-          
-          <div className="hidden lg:flex flex-grow max-w-lg mx-8">
-            <div className="relative w-full group">
-              <i className="fa-solid fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-black transition-colors"></i>
-              <input 
-                type="text" 
-                placeholder="Global qidiruv..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full h-10 bg-gray-50/50 border border-gray-100 rounded-lg pl-11 pr-4 text-[13px] focus:bg-white focus:border-black transition-all outline-none shadow-inner" 
-              />
+        <header className="sticky top-0 z-50 px-3 md:px-8 pt-3 md:pt-4 pb-2">
+          <div className="max-w-[1180px] mx-auto space-y-3">
+            <div className="ios-topbar rounded-[24px] border border-white/70 bg-white/75 backdrop-blur-xl px-4 md:px-6 py-3 flex items-center justify-between shadow-lg">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <img src={Logo} alt="GarajHub" className="w-7 h-7 rounded-lg" />
+                  <p className="text-[28px] leading-none font-black tracking-[-0.04em]">GarajHub</p>
+                </div>
+                <p className="text-[9px] uppercase tracking-[0.2em] font-bold text-slate-500 mt-1">{activeTab}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {!isProUser && proEnabled && (
+                  <button onClick={() => setShowProModal(true)} className="h-10 px-3 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-[12px] font-bold">
+                    Pro
+                  </button>
+                )}
+                {currentUser?.role === 'admin' && (
+                  <button onClick={() => navigateTo('admin')} className="h-10 px-3 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 text-[12px] font-bold">
+                    Admin
+                  </button>
+                )}
+                <button className="relative h-10 w-10 rounded-full border border-slate-200 bg-slate-100 text-slate-700">
+                  <i className="fa-regular fa-moon"></i>
+                </button>
+                <button onClick={() => navigateTo('inbox')} className="relative h-10 w-10 rounded-full border border-slate-200 bg-slate-100 text-slate-700">
+                  <i className="fa-regular fa-bell"></i>
+                  {unreadNotifCount > 0 && <span className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center">{unreadNotifCount}</span>}
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2 md:gap-6">
-            <button onClick={() => navigateTo('inbox')} className="relative p-2 text-gray-400 hover:text-black transition-colors">
-              <i className="fa-solid fa-bell text-[18px]"></i>
-              {unreadNotifCount > 0 && <span className="absolute top-1 right-1 h-4 w-4 bg-black text-white text-[9px] font-black flex items-center justify-center rounded-full ring-2 ring-white">{unreadNotifCount}</span>}
-            </button>
-            {currentUser && <button onClick={() => navigateTo('create')} className="w-9 h-9 md:w-10 md:h-10 bg-black text-white flex items-center justify-center rounded-lg shadow-lg hover:scale-105 active:scale-95 transition-all"><i className="fa-solid fa-plus text-sm"></i></button>}
+            <nav className="ios-navbar rounded-[22px] border border-slate-200/80 bg-white/85 backdrop-blur-xl p-1.5 shadow-md">
+              <div className="grid grid-cols-5 gap-1">
+                {topNavItems.map((item) => {
+                  const isActive = activeTab === item.key || (item.key === 'my-projects' && activeTab === 'details');
+                  const lockRequired = item.auth && !currentUser;
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => {
+                        if (lockRequired) return openAuth('login');
+                        navigateTo(item.key);
+                      }}
+                      className={`relative h-[58px] rounded-[18px] flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-all ${isActive ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-slate-600 hover:bg-slate-100'}`}
+                    >
+                      <i className={`fa-solid ${item.icon} text-[15px]`}></i>
+                      <span>{item.label}</span>
+                      {item.key === 'inbox' && unreadNotifCount > 0 && (
+                        <span className="absolute top-2 right-3 h-4 min-w-[16px] px-1 rounded-full bg-blue-600 text-white text-[9px] font-black flex items-center justify-center">{unreadNotifCount}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </nav>
           </div>
         </header>
 
-        <section className="flex-grow overflow-y-auto p-4 md:p-12 lg:p-16 custom-scrollbar scroll-smooth">
-          <div className="max-w-[1400px] mx-auto pb-20">
+        <section className="flex-grow overflow-y-auto p-3 md:p-8 lg:p-10 custom-scrollbar scroll-smooth">
+          <div className="max-w-[1180px] mx-auto pb-24">
             {activeTab === 'explore' && renderExplore()}
             {activeTab === 'create' && renderCreateStartup()}
             {activeTab === 'my-projects' && renderMyProjects()}
@@ -2366,8 +2790,9 @@ const App = () => {
       )}
 
       {/* EDIT PROFILE MODAL */}
-      <Modal isOpen={isEditProfileModalOpen} onClose={() => { setIsEditProfileModalOpen(false); setEditedUser({}); setTempFileBase64(null); }} title="Profilni tahrirlash">
+      <Modal isOpen={isEditProfileModalOpen} onClose={() => { setIsEditProfileModalOpen(false); setEditedUser({}); setTempFileBase64(null); setTempBannerBase64(null); }} title="Profilni tahrirlash">
         <div className="space-y-6 md:space-y-8">
+          <FileUpload label="Profil banneri" onChange={handleBannerChange} preview={tempBannerBase64 || editedUser.banner || currentUser?.banner} icon="fa-image" />
           <FileUpload label="Profil rasmi" onChange={handleFileChange} preview={editedUser.avatar || currentUser?.avatar} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
             <Input label="Ism" value={editedUser.name || currentUser?.name || ''} onChange={(e) => setEditedUser(prev => ({ ...prev, name: e.target.value }))} icon="fa-signature" />
@@ -2378,9 +2803,61 @@ const App = () => {
           <Input label="Portfolio" value={editedUser.portfolio_url || currentUser?.portfolio_url || ''} onChange={(e) => setEditedUser(prev => ({ ...prev, portfolio_url: e.target.value }))} placeholder="https://..." icon="fa-link" />
           
           <div className="flex flex-col sm:flex-row gap-3 md:gap-4 pt-4">
-             <Button variant="secondary" className="w-full h-12 md:h-10" onClick={() => { setIsEditProfileModalOpen(false); setEditedUser({}); setTempFileBase64(null); }}>Bekor qilish</Button>
+             <Button variant="secondary" className="w-full h-12 md:h-10" onClick={() => { setIsEditProfileModalOpen(false); setEditedUser({}); setTempFileBase64(null); setTempBannerBase64(null); }}>Bekor qilish</Button>
              <Button className="w-full h-12 md:h-10" onClick={handleUpdateProfile}>Saqlash</Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showProModal} onClose={() => { setShowProModal(false); setProReceiptBase64(''); }} title={proConfig.plan_name || 'GarajHub Pro'} size="lg">
+        <div className="space-y-7">
+          <div className="bg-gradient-to-r from-slate-900 via-gray-900 to-black rounded-2xl p-5 text-white space-y-2">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300 font-bold">To'lov ma'lumotlari</p>
+            <p className="text-xl font-black">{proConfig.price_text}</p>
+            <p className="text-[13px] text-slate-300">Karta egasi: <span className="text-white font-semibold">{proConfig.card_holder || 'Admin tomonidan kiritiladi'}</span></p>
+            <p className="text-[13px] text-slate-300">Karta raqami: <span className="text-white font-semibold">{proConfig.card_number || 'Admin tomonidan kiritiladi'}</span></p>
+            <p className="text-[13px] text-slate-300">Bank: <span className="text-white font-semibold">{proConfig.bank_name || '-'}</span></p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Karta egasining ism-familiyasi"
+              value={proRequestDraft.sender_full_name}
+              onChange={(e) => setProRequestDraft((p) => ({ ...p, sender_full_name: e.target.value }))}
+              placeholder="Ali Valiyev"
+              icon="fa-id-card"
+            />
+            <Input
+              label="To'lov qilgan karta raqami"
+              value={proRequestDraft.sender_card_number}
+              onChange={(e) => setProRequestDraft((p) => ({ ...p, sender_card_number: e.target.value }))}
+              placeholder="8600 **** **** 1234"
+              icon="fa-credit-card"
+            />
+          </div>
+
+          <FileUpload label={proConfig.receipt_note || 'Chek rasmini yuklang'} onChange={handleProReceiptChange} preview={proReceiptBase64 || undefined} icon="fa-receipt" />
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button variant="secondary" className="w-full" onClick={() => { setShowProModal(false); setProReceiptBase64(''); }}>Bekor qilish</Button>
+            <Button className="w-full" onClick={handleSubmitProRequest} icon="fa-paper-plane">Yuborish</Button>
+          </div>
+
+          {currentUser && proRequests.length > 0 && currentUser.role !== 'admin' && (
+            <div className="border-t border-gray-100 pt-6 space-y-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-widest text-gray-500">So'nggi Pro so'rovlar</h4>
+              {proRequests.slice(0, 5).map((r) => (
+                <div key={r.id} className="border border-gray-100 rounded-xl p-3 bg-gray-50/70">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[12px] font-semibold">{r.sender_full_name}</p>
+                    <Badge variant={r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'danger' : 'default'}>{r.status}</Badge>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1">{new Date(r.created_at).toLocaleString()}</p>
+                  {r.admin_note && <p className="text-[12px] text-gray-600 mt-2">Izoh: {r.admin_note}</p>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -2397,10 +2874,32 @@ const App = () => {
             linear-gradient(180deg, var(--surface-1), var(--surface-2));
         }
 
-        .app-shell aside,
-        .app-shell header,
-        .app-shell .bg-white {
-          backdrop-filter: saturate(1.1);
+        .ios-topbar,
+        .ios-navbar {
+          backdrop-filter: blur(18px) saturate(1.15);
+          -webkit-backdrop-filter: blur(18px) saturate(1.15);
+        }
+
+        .ios-topbar {
+          box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+        }
+
+        .ios-navbar {
+          box-shadow: 0 10px 25px rgba(15, 23, 42, 0.07);
+        }
+
+        @media (max-width: 640px) {
+          .ios-topbar {
+            border-radius: 22px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+          }
+          .ios-navbar {
+            border-radius: 20px;
+          }
+          .ios-navbar button {
+            border-radius: 16px;
+          }
         }
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
