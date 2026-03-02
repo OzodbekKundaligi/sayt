@@ -622,8 +622,12 @@ const App = () => {
       return undefined;
     }
     const refreshLoop = async () => {
-      const userNotifs = await dbOperations.getNotifications(currentUser.id).catch(() => []);
+      const [userNotifs, latestJoinRequests] = await Promise.all([
+        dbOperations.getNotifications(currentUser.id).catch(() => []),
+        dbOperations.getJoinRequests().catch(() => [])
+      ]);
       if (Array.isArray(userNotifs)) setNotifications(userNotifs);
+      if (Array.isArray(latestJoinRequests)) setJoinRequests(latestJoinRequests);
 
       const freshUser = await dbOperations.getUserById(currentUser.id).catch(() => null);
       if (freshUser) {
@@ -885,20 +889,57 @@ const App = () => {
       created_at: new Date().toISOString()
     };
 
-    await dbOperations.createJoinRequest(req);
-    setJoinRequests(prev => [req, ...prev]);
+    const createdRequest = await dbOperations.createJoinRequest(req);
+    setJoinRequests(prev => [createdRequest, ...prev.filter((x) => x.id !== createdRequest.id)]);
     
-    await addNotification(s.egasi_id, 'Yangi ariza', `"${currentUser.name}" jamoangizga qo'shilmoqchi.`, 'info');
+    await addNotification(
+      s.egasi_id,
+      'Yangi qo\'shilish so\'rovi',
+      `"${currentUser.name}" "${s.nomi}" startupiga qo'shilmoqchi.`,
+      'info',
+      {
+        type: 'join_request',
+        join_request_id: createdRequest.id,
+        startup_id: s.id,
+        startup_name: s.nomi,
+        requester_id: currentUser.id,
+        requester_name: currentUser.name,
+        requester_avatar: currentUser.avatar || '',
+        requester_phone: currentUser.phone || '',
+        specialty,
+        comment: createdRequest.comment || ''
+      }
+    );
     alert('So\'rovingiz muvaffaqiyatli yuborildi!');
   };
 
-  const handleRequestAction = async (id, action) => {
-    const r = joinRequests.find(x => x.id === id);
-    if (!r) return;
+  const handleRequestAction = async (id, action, options = {}) => {
+    const { notificationId = null, requestPayload = null } = options;
+    let r = joinRequests.find(x => x.id === id) || requestPayload || null;
+    if (!r) {
+      const latest = await dbOperations.getJoinRequests().catch(() => []);
+      if (Array.isArray(latest)) {
+        setJoinRequests(latest);
+        r = latest.find((x) => x.id === id) || requestPayload || null;
+      }
+    }
+    if (!r) {
+      if (notificationId) {
+        await handleMarkAsRead(notificationId).catch(() => null);
+      }
+      return alert('Bu so\'rov allaqachon ko\'rib chiqilgan yoki topilmadi.');
+    }
     
     if (action === 'accept') {
-      const startup = startups.find(s => s.id === r.startup_id);
-      if (!startup) return;
+      let startup = startups.find(s => s.id === r.startup_id);
+      if (!startup) {
+        const latestStartups = await dbOperations.getStartups().catch(() => []);
+        if (Array.isArray(latestStartups)) {
+          setStartups(latestStartups);
+          startup = latestStartups.find((s) => s.id === r.startup_id);
+        }
+      }
+      if (!startup) return alert('Startup topilmadi.');
 
       const newMember = { 
         user_id: r.user_id, 
@@ -907,25 +948,37 @@ const App = () => {
         joined_at: new Date().toISOString() 
       };
       
-      const updatedAZolar = [...startup.a_zolar, newMember];
-      
-      await dbOperations.updateStartup(r.startup_id, { a_zolar: updatedAZolar });
-      await dbOperations.logWorkspaceActivity(r.startup_id, {
-        user_id: currentUser?.id || 'system',
-        activity_type: 'member_joined',
-        payload: { user_id: r.user_id, user_name: r.user_name, role: r.specialty },
-        hours_spent: 0
-      });
+      const memberAlreadyExists = startup.a_zolar.some((m) => m.user_id === r.user_id);
+      const updatedAZolar = memberAlreadyExists ? startup.a_zolar : [...startup.a_zolar, newMember];
+      if (!memberAlreadyExists) {
+        await dbOperations.updateStartup(r.startup_id, { a_zolar: updatedAZolar });
+        await dbOperations.logWorkspaceActivity(r.startup_id, {
+          user_id: currentUser?.id || 'system',
+          activity_type: 'member_joined',
+          payload: { user_id: r.user_id, user_name: r.user_name, role: r.specialty },
+          hours_spent: 0
+        });
+      }
       
       setStartups(prev => prev.map(s => 
         s.id === r.startup_id ? { ...s, a_zolar: updatedAZolar } : s
       ));
       
       await addNotification(r.user_id, 'Tabriklaymiz!', `Siz "${r.startup_name}" jamoasiga qabul qilindingiz.`, 'success');
+    } else {
+      await addNotification(
+        r.user_id,
+        'Qo\'shilish so\'rovi rad etildi',
+        `"${r.startup_name}" jamoasi so'rovingizni rad etdi.`,
+        'danger'
+      );
     }
     
     await dbOperations.deleteRequest(id);
     setJoinRequests(prev => prev.filter(x => x.id !== id));
+    if (notificationId) {
+      await handleMarkAsRead(notificationId).catch(() => null);
+    }
   };
 
   const handleAdminModeration = async (id, action) => {
@@ -1721,6 +1774,14 @@ const App = () => {
   const invitationByNotification = useMemo(
     () => Object.fromEntries((pendingInvitations || []).map((inv) => [inv.notification_id, inv])),
     [pendingInvitations]
+  );
+  const joinRequestById = useMemo(
+    () => Object.fromEntries((joinRequests || []).map((req) => [req.id, req])),
+    [joinRequests]
+  );
+  const usersById = useMemo(
+    () => Object.fromEntries((allUsers || []).map((user) => [user.id, user])),
+    [allUsers]
   );
 
   const selectedStartup = startups.find(s => s.id === selectedStartupId);
@@ -3496,9 +3557,27 @@ const App = () => {
         <div className="space-y-4">
           {incomingRequests.map(r => (
             <div key={r.id} className="bg-white border border-gray-200 rounded-xl p-6 md:p-8 flex flex-col md:flex-row items-center gap-6 md:gap-8 hover:shadow-md transition-all">
-              <div className="w-12 h-12 md:w-14 md:h-14 bg-gray-50 rounded-full flex items-center justify-center font-black text-lg md:text-xl italic border border-gray-100 shadow-inner shrink-0">{r.user_name[0]}</div>
+              <button
+                onClick={() => handleOpenUserProfile(r.user_id)}
+                className="shrink-0"
+                title="Profilni ochish"
+              >
+                {(usersById[r.user_id]?.avatar) ? (
+                  <img
+                    src={usersById[r.user_id].avatar}
+                    alt={r.user_name}
+                    className="w-12 h-12 md:w-14 md:h-14 rounded-full border border-gray-100 shadow-inner object-cover"
+                  />
+                ) : (
+                  <div className="w-12 h-12 md:w-14 md:h-14 bg-gray-50 rounded-full flex items-center justify-center font-black text-lg md:text-xl italic border border-gray-100 shadow-inner">
+                    {String(r.user_name || 'F').slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+              </button>
               <div className="flex-grow text-center md:text-left space-y-2 min-w-0">
-                <h3 className="text-lg md:text-xl font-bold tracking-tight truncate">{r.user_name}</h3>
+                <button onClick={() => handleOpenUserProfile(r.user_id)} className="text-lg md:text-xl font-bold tracking-tight truncate hover:underline">
+                  {r.user_name}
+                </button>
                 <div className="flex gap-2 justify-center md:justify-start flex-wrap">
                   <Badge variant="active">{r.specialty}</Badge>
                   <Badge className="truncate max-w-[150px]">Loyiha: {r.startup_name}</Badge>
@@ -3541,6 +3620,14 @@ const App = () => {
         <div className="space-y-3 px-2">
           {userNotifications.map(n => {
             const invitation = invitationByNotification[n.id] || null;
+            const joinMeta = n?.meta?.type === 'join_request' ? n.meta : null;
+            const linkedJoinRequest = joinMeta ? joinRequestById[joinMeta.join_request_id] : null;
+            const joinRequester = joinMeta
+              ? (usersById[joinMeta.requester_id] || null)
+              : null;
+            const joinRequesterName = joinRequester?.name || joinMeta?.requester_name || "Foydalanuvchi";
+            const joinRequesterAvatar = joinRequester?.avatar || joinMeta?.requester_avatar || '';
+            const joinRequesterId = joinRequester?.id || joinMeta?.requester_id || '';
             return (
               <div 
                 key={n.id} 
@@ -3553,6 +3640,82 @@ const App = () => {
                 <div className="flex-grow min-w-0">
                   <h5 className="text-[13px] md:text-[14px] font-bold italic mb-1 truncate">{n.title}</h5>
                   <p className="text-[12px] md:text-[13px] text-gray-500 leading-relaxed mb-2 line-clamp-3">{n.text}</p>
+                  {joinMeta && (
+                    <div className="bg-white border border-gray-100 rounded-lg p-3 mb-2 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <button
+                          className="flex items-center gap-3 min-w-0 text-left"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (joinRequesterId) handleOpenUserProfile(joinRequesterId);
+                          }}
+                        >
+                          {joinRequesterAvatar ? (
+                            <img
+                              src={joinRequesterAvatar}
+                              alt={joinRequesterName}
+                              className="w-10 h-10 rounded-full object-cover border border-gray-200 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-[12px] font-bold shrink-0">
+                              {String(joinRequesterName || 'F').slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-[12px] font-bold text-gray-800 truncate">{joinRequesterName}</p>
+                            <p className="text-[11px] text-gray-500 truncate">
+                              {joinMeta.specialty || linkedJoinRequest?.specialty || "Mutaxassislik ko'rsatilmagan"}
+                            </p>
+                          </div>
+                        </button>
+                        {joinMeta.startup_name && (
+                          <Badge variant="active" className="max-w-[150px] truncate">
+                            {joinMeta.startup_name}
+                          </Badge>
+                        )}
+                      </div>
+
+                      {(joinMeta.comment || linkedJoinRequest?.comment) && (
+                        <p className="text-[12px] text-gray-600">
+                          "{joinMeta.comment || linkedJoinRequest?.comment}"
+                        </p>
+                      )}
+
+                      {linkedJoinRequest ? (
+                        <div className="flex gap-2 flex-wrap">
+                          <Button
+                            size="sm"
+                            className="h-8 px-4"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRequestAction(linkedJoinRequest.id, 'accept', {
+                                notificationId: n.id,
+                                requestPayload: linkedJoinRequest
+                              });
+                            }}
+                          >
+                            Tasdiqlash
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            className="h-8 px-4"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRequestAction(linkedJoinRequest.id, 'decline', {
+                                notificationId: n.id,
+                                requestPayload: linkedJoinRequest
+                              });
+                            }}
+                          >
+                            Rad etish
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-gray-500">Bu so'rov allaqachon ko'rib chiqilgan.</p>
+                      )}
+                    </div>
+                  )}
                   {invitation && invitation.status === 'pending' && (
                     <div className="bg-white border border-blue-100 rounded-lg p-3 mb-2 space-y-2">
                       <p className="text-[12px] font-semibold text-gray-700">
