@@ -2,8 +2,11 @@ import mongoose from 'mongoose';
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:oOtQMUCpqpIzynSCUEVZfCQQBCMQaxBQ@tramway.proxy.rlwy.net:10002';
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME || 'GarajHubsayt';
+<<<<<<< HEAD
 const DEFAULT_PRO_PLAN_NAME = 'CO Foundix Pro';
 const LEGACY_PRO_PLAN_NAME = 'GarajHub Pro';
+=======
+>>>>>>> c7233f55c37a4a487c49f168b9369d069d0f3ba4
 
 let db = null;
 
