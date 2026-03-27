@@ -1,0 +1,189 @@
+﻿Diagnose log at 2026-03-26T17:58:10Z
+
+AppPath: C:\Program Files\Git\mingw64\bin\git-credential-manager.exe
+InstallDir: C:\Program Files\Git\mingw64\bin\
+Version: 2.6.1+786ab03440ddc82e807a97c0e540f5247e44cec6
+
+------------
+Diagnostic: Environment
+Skipped: False
+Success: True
+Exception: None
+Log:
+OSType: Windows
+OSVersion: 10.0 (build 26200)
+Reading environment variables... OK
+ Variables:
+PROCESSOR_ARCHITEW6432=AMD64
+DriverData=C:\Windows\System32\Drivers\DriverData
+COMPUTERNAME=OZODBEK
+GIT_TRACE2_PARENT_SID=d2902433-997e-45fa-8e9f-38e0b0f73180
+CommonProgramFiles(x86)=C:\Program Files (x86)\Common Files
+OneDrive=C:\Users\i7\OneDrive
+CODEX_THREAD_ID=019d2b42-39a4-7fb0-a487-e12c14c71754
+HOMEPATH=\Users\i7
+VSCODE_HANDLES_UNCAUGHT_ERRORS=true
+GIT_CONFIG_KEY_0=safe.directory
+TMP=C:\Users\i7\AppData\Local\Temp
+LC_CTYPE=C.UTF-8
+PROCESSOR_ARCHITECTURE=x86
+PATHEXT=.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL
+VSCODE_IPC_HOOK=\\.\pipe\7fba3edf-1.112.0-main-sock
+SystemDrive=C:
+GIT_EXEC_PATH=C:/Program Files/Git/mingw64/libexec/git-core
+TEMP=C:\Users\i7\AppData\Local\Temp
+LOCALAPPDATA=C:\Users\i7\AppData\Local
+MSYSTEM=MINGW64
+TERM=xterm-256color
+PROCESSOR_IDENTIFIER=Intel64 Family 6 Model 186 Stepping 3, GenuineIntel
+ProgramData=C:\ProgramData
+VSCODE_ESM_ENTRYPOINT=vs/workbench/api/node/extensionHostProcess
+LESS=
+PROCESSOR_REVISION=ba03
+windir=C:\WINDOWS
+GIT_CONFIG_VALUE_0=C:\Users\i7\OneDrive\Desktop\GarajHub---sayt-main
+PROCESSOR_LEVEL=6
+NUMBER_OF_PROCESSORS=8
+PATH=C:/Program Files/Git/mingw64/libexec/git-core;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Users\i7\bin;C:\Users\i7\.codex\tmp\arg0\codex-arg0b45mGR;C:\Users\i7\AppData\Local\Programs\Microsoft VS Code;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\Git\cmd;C:\Program Files\nodejs\;C:\Users\i7\scoop\shims;C:\Users\i7\.local\bin;C:\Users\i7\AppData\Local\Microsoft\WindowsApps;C:\Program Files\Git\bin;C:\Users\i7\AppData\Local\GitHubDesktop\bin;C:\Users\i7\AppData\Roaming\npm;C:\Users\i7\AppData\Local\Programs\Microsoft VS Code\bin;c:\Users\i7\.vscode\extensions\openai.chatgpt-26.324.21329-win32-x64\bin\windows-x86_64
+GIT_CONFIG_COUNT=1
+ZES_ENABLE_SYSMAN=1
+ProgramFiles(x86)=C:\Program Files (x86)
+PUBLIC=C:\Users\Public
+VSCODE_NLS_CONFIG={"userLocale":"en-us","osLocale":"uz-latn","resolvedLanguage":"en","defaultMessagesFile":"C:\\Users\\i7\\AppData\\Local\\Programs\\Microsoft VS Code\\07ff9d6178\\resources\\app\\out\\nls.messages.json","locale":"en-us","availableLanguages":{}}
+FPS_BROWSER_USER_PROFILE_STRING=Default
+CommonProgramFiles=C:\Program Files (x86)\Common Files
+USERDOMAIN_ROAMINGPROFILE=OZODBEK
+CODEX_SANDBOX_NETWORK_DISABLED=1
+PLINK_PROTOCOL=ssh
+COLORTERM=truecolor
+ProgramW6432=C:\Program Files
+GIT_PAGER=more.com
+ProgramFiles=C:\Program Files (x86)
+DEBUG=release
+C:\Users\i7=C:\Users\i7
+VSCODE_CODE_CACHE_PATH=C:\Users\i7\AppData\Roaming\Code\CachedData\07ff9d6178ede9a1bd12ad3399074d726ebe6e43
+TMPDIR=C:\Users\i7\AppData\Local\Temp
+SystemRoot=C:\WINDOWS
+HOME=C:\Users\i7
+CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_vscode
+CommonProgramW6432=C:\Program Files\Common Files
+APPLICATION_INSIGHTS_NO_STATSBEAT=true
+LOGONSERVER=\\OZODBEK
+VSCODE_CWD=C:\WINDOWS\system32
+USERPROFILE=C:\Users\i7
+USERDOMAIN=OZODBEK
+APPDATA=C:\Users\i7\AppData\Roaming
+HOMEDRIVE=C:
+RUST_LOG=warn
+VSCODE_PID=3952
+PSModulePath=C:\Users\i7\Documents\WindowsPowerShell\Modules;C:\Program Files\WindowsPowerShell\Modules;C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules
+ELECTRON_RUN_AS_NODE=1
+USERNAME=Ozodbek Mamatov
+FPS_BROWSER_APP_PROFILE_STRING=Internet Explorer
+C:\Program Files\Git\bin=C:\Program Files\Git\bin
+OS=Windows_NT
+ComSpec=C:\WINDOWS\system32\cmd.exe
+PAGER=more.com
+VSCODE_CRASH_REPORTER_PROCESS_TYPE=extensionHost
+ALLUSERSPROFILE=C:\ProgramData
+
+
+------------
+Diagnostic: File system
+Skipped: False
+Success: True
+Exception: None
+Log:
+Temporary directory is 'C:\Users\i7\AppData\Local\Temp\'...
+Checking basic file I/O...
+Writing to temporary file 'C:\Users\i7\AppData\Local\Temp\0195425eb7297648fcf0dc12'... OK
+Reading from temporary file 'C:\Users\i7\AppData\Local\Temp\0195425eb7297648fcf0dc12'... OK
+Deleting temporary file 'C:\Users\i7\AppData\Local\Temp\0195425eb7297648fcf0dc12'... OK
+Testing IFileSystem instance...
+UserHomePath: C:\Users\CodexSandboxOffline
+UserDataDirectoryPath: C:\Users\CodexSandboxOffline\.gcm
+GetCurrentDirectory(): C:\Users\i7\OneDrive\Desktop\GarajHub---sayt-main
+
+------------
+Diagnostic: Networking
+Skipped: False
+Success: False
+Exception:
+System.Net.Http.HttpRequestException: An error occurred while sending the request. ---> System.Net.WebException: Unable to connect to the remote server ---> System.Net.Sockets.SocketException: An attempt was made to access a socket in a way forbidden by its access permissions 104.18.26.120:443
+   at System.Net.Sockets.Socket.InternalEndConnect(IAsyncResult asyncResult)
+   at System.Net.Sockets.Socket.EndConnect(IAsyncResult asyncResult)
+   at System.Net.ServicePoint.ConnectSocketInternal(Boolean connectFailure, Socket s4, Socket s6, Socket& socket, IPAddress& address, ConnectSocketState state, IAsyncResult asyncResult, Exception& exception)
+   --- End of inner exception stack trace ---
+   at System.Net.HttpWebRequest.EndGetResponse(IAsyncResult asyncResult)
+   at System.Net.Http.HttpClientHandler.GetResponseCallback(IAsyncResult ar)
+   --- End of inner exception stack trace ---
+   at System.Runtime.CompilerServices.TaskAwaiter.ThrowForNonSuccess(Task task)
+   at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   at System.Runtime.CompilerServices.TaskAwaiter`1.GetResult()
+   at GitCredentialManager.Diagnostics.NetworkingDiagnostic.<RunInternalAsync>d__4.MoveNext()
+--- End of stack trace from previous location where exception was thrown ---
+   at System.Runtime.CompilerServices.TaskAwaiter.ThrowForNonSuccess(Task task)
+   at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   at System.Runtime.CompilerServices.TaskAwaiter`1.GetResult()
+   at GitCredentialManager.Diagnostics.Diagnostic.<RunAsync>d__6.MoveNext()
+Log:
+Checking networking and HTTP stack...
+Creating HTTP client... OK
+IsNetworkAvailable: True
+Sending HEAD request to http://example.com...Sending HEAD request to https://example.com... warning: HEAD request failed
+Sending HEAD request to http://httpforever.com...
+------------
+Diagnostic: Git
+Skipped: False
+Success: True
+Exception: None
+Log:
+Getting Git version... OK
+Git version is '2.51.2.windows.1'
+Locating current repository...Git repository at 'C:/Users/i7/OneDrive/Desktop/GarajHub---sayt-main/.git'
+ OK
+Listing all Git configuration... OK
+Git configuration:
+file:C:/Program Files/Git/etc/gitconfig	diff.astextplain.textconv=astextplain
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.clean=git-lfs clean -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.smudge=git-lfs smudge -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.process=git-lfs filter-process
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.required=true
+file:C:/Program Files/Git/etc/gitconfig	http.sslbackend=schannel
+file:C:/Program Files/Git/etc/gitconfig	core.autocrlf=true
+file:C:/Program Files/Git/etc/gitconfig	core.fscache=true
+file:C:/Program Files/Git/etc/gitconfig	core.symlinks=false
+file:C:/Program Files/Git/etc/gitconfig	pull.rebase=false
+file:C:/Program Files/Git/etc/gitconfig	credential.helper=manager
+file:C:/Program Files/Git/etc/gitconfig	credential.https://dev.azure.com.usehttppath=true
+file:C:/Program Files/Git/etc/gitconfig	init.defaultbranch=master
+file:C:/Users/i7/.gitconfig	user.name=Ozodbek
+file:C:/Users/i7/.gitconfig	user.email=tradyumuz@gmail.com
+file:C:/Users/i7/.gitconfig	safe.directory=C:/Users/i7/OneDrive/Desktop/bot
+file:C:/Users/i7/.gitconfig	safe.directory=C:/Users/i7/OneDrive/Desktop/Sora-Ai-main
+file:.git/config	core.repositoryformatversion=0
+file:.git/config	core.filemode=false
+file:.git/config	core.bare=false
+file:.git/config	core.logallrefupdates=true
+file:.git/config	core.symlinks=false
+file:.git/config	core.ignorecase=true
+file:.git/config	remote.upstream.url=https://github.com/OzodbekKundaligi/sayt.git
+file:.git/config	remote.upstream.fetch=+refs/heads/*:refs/remotes/upstream/*
+file:.git/config	branch.main.remote=origin
+file:.git/config	branch.main.merge=refs/heads/main
+file:.git/config	remote.origin.url=https://github.com/Mamatov-cmd/sayt.git
+file:.git/config	remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*
+command line:	safe.directory=C:\Users\i7\OneDrive\Desktop\GarajHub---sayt-main
+
+
+------------
+Diagnostic: Credential storage
+Skipped: False
+Success: True
+Exception: None
+Log:
+ICredentialStore instance is of type: CredentialStore
+Writing test credential... OK
+Reading test credential... OK
+Deleting test credential... OK
+
